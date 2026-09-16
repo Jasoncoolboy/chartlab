@@ -1,0 +1,319 @@
+"""Tests for the standalone ChartLab generator (stdlib only).
+
+Run from the repository root::
+
+    python3 -m unittest discover -s chartlab/tests -v
+
+or directly::
+
+    python3 chartlab/tests/test_chart.py
+"""
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import chart  # noqa: E402
+
+
+def _bars(n=3, start=1704067200):
+    return {
+        "time": [start + i * 86400 for i in range(n)],
+        "open": [2050.0 + i for i in range(n)],
+        "high": [2056.0 + i for i in range(n)],
+        "low": [2048.0 + i for i in range(n)],
+        "close": [2054.0 + i for i in range(n)],
+    }
+
+
+class TestTime(unittest.TestCase):
+    def test_epoch_passthrough(self):
+        self.assertEqual(chart.to_epoch(1704067200), 1704067200)
+
+    def test_iso_string(self):
+        self.assertEqual(chart.to_epoch("2024-01-01T00:00:00Z"), 1704067200)
+
+    def test_naive_datetime_is_utc(self):
+        dt = datetime(2024, 1, 1, 0, 0, 0)
+        self.assertEqual(chart.to_epoch(dt), 1704067200)
+
+    def test_aware_datetime(self):
+        dt = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        self.assertEqual(chart.to_epoch(dt), 1704067200)
+
+    def test_numeric_string(self):
+        self.assertEqual(chart.to_epoch("1704067200"), 1704067200)
+
+    def test_bool_rejected(self):
+        with self.assertRaises(TypeError):
+            chart.to_epoch(True)
+
+
+class TestNormalization(unittest.TestCase):
+    def test_bars_from_dict_rows(self):
+        rows = [
+            {"time": 1704067200, "open": 1, "high": 2, "low": 0, "close": 1.5},
+            {"time": 1704153600, "open": 1.5, "high": 3, "low": 1, "close": 2},
+        ]
+        block = chart.bars_from_rows(rows)
+        self.assertEqual(block["time"], [1704067200, 1704153600])
+        self.assertEqual(block["high"], [2.0, 3.0])
+        self.assertNotIn("volume", block)
+
+    def test_bars_from_sequence_rows(self):
+        rows = [(1704067200, 1, 2, 0, 1.5)]
+        block = chart.bars_from_rows(rows)
+        self.assertEqual(block["close"], [1.5])
+
+    def test_compact_block_keys(self):
+        out = chart.spec("X", {"D1": {"t": [1704067200], "o": [1.0], "h": [2.0],
+                                        "l": [0.5], "c": [1.5]}})
+        self.assertEqual(out["timeframes"]["D1"]["close"], [1.5])
+
+    def test_trade_aliases(self):
+        trades = chart.trades_from_rows([
+            {"direction": "buy", "entry_time": 1704067200, "entry_price": 2050,
+             "stop": 2040, "target": 2070, "net": 100},
+        ])
+        t = trades[0]
+        self.assertEqual(t["dir"], "long")
+        self.assertEqual(t["entryTime"], 1704067200)
+        self.assertEqual(t["sl"], 2040.0)
+        self.assertEqual(t["tp"], 2070.0)
+
+    def test_zone_aliases(self):
+        zones = chart.zones_from_rows([
+            {"from": 1704067200, "to": 1704326400, "lo": 2048, "hi": 2066, "name": "Z"},
+        ])
+        z = zones[0]
+        self.assertEqual(z["start"], 1704067200)
+        self.assertEqual(z["end"], 1704326400)
+        self.assertEqual(z["low"], 2048.0)
+        self.assertEqual(z["high"], 2066.0)
+        self.assertEqual(z["label"], "Z")
+
+    def test_indicators_from_rows(self):
+        inds = chart.indicators_from_rows([
+            {"name": "SMA3", "type": "sma", "period": 3, "values": [1, 2, 3], "on": False},
+        ])
+        self.assertEqual(inds[0]["period"], 3)
+        self.assertIs(inds[0]["on"], False)
+
+
+class TestSpecAndValidate(unittest.TestCase):
+    def test_spec_defaults_to_largest_tf(self):
+        s = chart.spec("XAUUSD", {"D1": _bars(3), "H4": _bars(5)},
+                       default_tf=None, trades=[], zones=[])
+        self.assertEqual(s["defaultTimeframe"], "H4")
+        self.assertEqual(s["version"], 1)
+
+    def test_spec_rejects_unknown_default(self):
+        with self.assertRaises(ValueError):
+            chart.spec("X", {"D1": _bars(2)}, default_tf="W1")
+
+    def test_validate_clean(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        self.assertEqual(chart.validate(s), [])
+
+    def test_validate_length_mismatch(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        s["timeframes"]["D1"]["close"].pop()
+        problems = chart.validate(s)
+        self.assertTrue(any("close length" in p for p in problems))
+
+    def test_validate_unsorted_time(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        s["timeframes"]["D1"]["time"] = [3, 1, 2]
+        self.assertTrue(any("not ascending" in p for p in chart.validate(s)))
+
+    def test_validate_missing_default(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        s["defaultTimeframe"] = "W1"
+        self.assertTrue(any("defaultTimeframe" in p for p in chart.validate(s)))
+
+
+class TestRender(unittest.TestCase):
+    def test_render_writes_page_and_lib(self):
+        s = chart.spec("XAUUSD", {"D1": _bars(3)}, period_label="D1 · XAUUSD")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "page.html"
+            chart.render(s, out, title="Test Page")
+            html = out.read_text(encoding="utf-8")
+            self.assertIn("<title>Test Page</title>", html)
+            self.assertIn(str(1704067200), html)
+            self.assertTrue((Path(tmp) / "lib" / chart.LIB_NAME).exists())
+
+    def test_render_inline_lib(self):
+        s = chart.spec("X", {"D1": _bars(2)})
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "p.html"
+            chart.render(s, out, inline_lib=True)
+            html = out.read_text(encoding="utf-8")
+            self.assertIn("data:text/javascript;base64,", html)
+            self.assertFalse((Path(tmp) / "lib").exists())
+
+    def test_render_file_roundtrip(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        with tempfile.TemporaryDirectory() as tmp:
+            spec_path = Path(tmp) / "s.json"
+            spec_path.write_text(json.dumps(s), encoding="utf-8")
+            out = chart.render_file(spec_path, Path(tmp) / "o.html")
+            self.assertTrue(out.exists())
+
+
+class TestCsv(unittest.TestCase):
+    def _write(self, path, text):
+        Path(path).write_text(text, encoding="utf-8")
+
+    def test_bars_trades_equity_from_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bars_csv = Path(tmp) / "bars.csv"
+            self._write(bars_csv, "date,open,high,low,close\n"
+                                  "2024-01-01T00:00:00Z,1,2,0.5,1.5\n"
+                                  "2024-01-02T00:00:00Z,1.5,2.5,1,2\n")
+            block = chart.bars_from_csv(bars_csv)
+            self.assertEqual(block["time"], [1704067200, 1704153600])
+            self.assertEqual(block["open"], [1.0, 1.5])
+
+            trades_csv = Path(tmp) / "t.csv"
+            self._write(trades_csv, "dir,entry_time,entry_price,exit_time,exit_price,net\n"
+                                    "long,2024-01-01T00:00:00Z,2050,2024-01-02T00:00:00Z,2060,100\n")
+            t = chart.trades_from_csv(trades_csv)[0]
+            self.assertEqual(t["dir"], "long")
+            self.assertEqual(t["entryPrice"], 2050.0)
+
+            eq_csv = Path(tmp) / "e.csv"
+            self._write(eq_csv, "time,equity\n2024-01-01T00:00:00Z,100000\n"
+                                "2024-01-02T00:00:00Z,100500\n")
+            eq = chart.equity_from_csv(eq_csv)
+            self.assertEqual(eq["value"], [100000.0, 100500.0])
+
+
+class TestGalleryAndIndicators(unittest.TestCase):
+    def test_gallery_lists_pages(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chart.render(s, root / "a.html", title="Alpha")
+            idx = chart.gallery(root, title="Charts")
+            html = idx.read_text(encoding="utf-8")
+            self.assertIn("a.html", html)
+
+    def test_parse_indicators(self):
+        inds = chart.parse_indicators("SMA50, EMA200 ,BB20")
+        self.assertEqual([i["type"] for i in inds], ["sma", "ema", "bb"])
+        self.assertEqual(inds[0]["period"], 50)
+        self.assertEqual(inds[1]["period"], 200)
+
+
+class TestNormalize(unittest.TestCase):
+    def test_normalize_iso_and_aliases(self):
+        raw = {
+            "symbol": "X",
+            "timeframes": {"D1": {"time": ["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"],
+                                  "o": [1, 2], "h": [2, 3], "l": [0.5, 1], "c": [1.5, 2]}},
+            "overlay": {"trades": [{"side": "buy", "time": "2024-01-01T00:00:00Z",
+                                    "price": 1.0, "exit_time": "2024-01-02T00:00:00Z",
+                                    "exit_price": 2.0}]},
+        }
+        s = chart.normalize(raw)
+        self.assertEqual(s["timeframes"]["D1"]["time"], [1704067200, 1704153600])
+        self.assertEqual(s["defaultTimeframe"], "D1")
+        self.assertEqual(s["overlay"]["trades"][0]["dir"], "long")
+        self.assertEqual(s["overlay"]["trades"][0]["entryTime"], 1704067200)
+        self.assertEqual(chart.validate(s), [])
+
+    def test_normalize_does_not_mutate_input(self):
+        raw = {"symbol": "X", "timeframes": {"D1": {"t": [1], "o": [1], "h": [1],
+                                                     "l": [1], "c": [1]}}}
+        chart.normalize(raw)
+        self.assertIn("t", raw["timeframes"]["D1"])
+
+
+class TestRenderSafety(unittest.TestCase):
+    def test_payload_escapes_script_tag(self):
+        s = {"symbol": "</script><b>x", "timeframes": {"D1": _bars(1)}}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = chart.render(s, Path(tmp) / "p.html")
+            html = out.read_text(encoding="utf-8")
+            self.assertNotIn("</script><b>", html)
+            self.assertIn("\\u003c/script", html)
+
+    def test_render_accepts_raw_iso_spec(self):
+        raw = {"symbol": "X",
+               "timeframes": {"D1": {"time": ["2024-01-01T00:00:00Z"],
+                                     "o": [1], "h": [1], "l": [1], "c": [1]}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = chart.render(raw, Path(tmp) / "p.html")
+            html = out.read_text(encoding="utf-8")
+            self.assertIn("1704067200", html)
+            self.assertNotIn("2024-01-01T00:00:00Z", html)
+
+
+class TestStats(unittest.TestCase):
+    def test_stats_from_list_and_dict(self):
+        rows = chart.stats_from_rows([
+            {"name": "Return", "value": "+22.59%", "tone": "good"},
+            ["Max DD", -22.51],
+        ])
+        self.assertEqual(rows[0], {"label": "Return", "value": "+22.59%", "tone": "up"})
+        self.assertEqual(rows[1]["label"], "Max DD")
+        self.assertEqual(rows[1]["value"], -22.51)
+        d = chart.stats_from_rows({"Trades": 117})
+        self.assertEqual(d, [{"label": "Trades", "value": 117}])
+
+    def test_spec_and_normalize_carry_stats(self):
+        s = chart.spec("X", {"D1": _bars(2)}, stats=[{"label": "N", "value": 1}])
+        self.assertEqual(s["stats"], [{"label": "N", "value": 1}])
+        raw = {"symbol": "X", "timeframes": {"D1": {"t": [1], "o": [1], "h": [1],
+                                                     "l": [1], "c": [1]}},
+               "stats": {"PF": 1.23}}
+        self.assertEqual(chart.normalize(raw)["stats"], [{"label": "PF", "value": 1.23}])
+
+
+class TestCompact(unittest.TestCase):
+    def _decode_u32(self, b):
+        raw = __import__("base64").b64decode(b)
+        return list(__import__("struct").unpack("<%dI" % (len(raw) // 4), raw))
+
+    def _decode_i32(self, b):
+        raw = __import__("base64").b64decode(b)
+        return [x / 10000 for x in __import__("struct").unpack("<%di" % (len(raw) // 4), raw)]
+
+    def test_encode_block_roundtrip(self):
+        block = _bars(3)
+        enc = chart.encode_block(block)
+        self.assertEqual(self._decode_u32(enc["t"]), block["time"])
+        self.assertEqual(self._decode_i32(enc["o"]), block["open"])
+        self.assertEqual(self._decode_i32(enc["c"]), block["close"])
+
+    def test_compact_page_is_smaller(self):
+        s = chart.spec("X", {"D1": _bars(50)})
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = chart.render(s, Path(tmp) / "plain.html")
+            small = chart.render(s, Path(tmp) / "small.html", compact=True)
+            self.assertLess(small.stat().st_size, plain.stat().st_size)
+            html = small.read_text(encoding="utf-8")
+            self.assertIn('"t":"', html)
+            self.assertNotIn('"time":[', html)
+
+
+class TestLoader(unittest.TestCase):
+    def test_render_loader_embeds_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = chart.render_loader(Path(tmp) / "l.html", "specs/xau.json")
+            html = out.read_text(encoding="utf-8")
+            self.assertIn('"specs/xau.json"', html)
+            self.assertIn("lib/" + chart.LIB_NAME, html)
+            self.assertNotIn("__SPEC_URL__", html)
+            self.assertIn('<script id="payload" type="application/json">null</script>', html)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
