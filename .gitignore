@@ -20,3 +20,7 @@ dist/
 .venv/
 venv/
 env/
+
+# Local pipeline data / artifacts
+data/
+out/
