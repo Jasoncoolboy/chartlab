@@ -17,28 +17,67 @@ def _epochs(index) -> list:
     return [int(x) for x in (np.asarray(index.asi8) // 1_000_000_000)]
 
 
-def bars_block(df: pd.DataFrame, prefix: str | None = None, include_volume: bool = False) -> dict:
-    """Resample-ready bars -> chart spec bar block (vectorized).
+def ohlc_columns(df: pd.DataFrame, prefix: str | None = None) -> dict:
+    """Map ``open/high/low/close/volume`` to the frame's own column names.
 
-    ``include_volume`` defaults to False because the bundled viewer has no
-    volume pane; pass True when a downstream consumer needs it.
+    Understands the three shapes used across this research: priceData's
+    ``Open/High/Low/Close/Volume``, plain lowercase, and the Dukascopy
+    pipeline's ``bid_*``. An explicit ``prefix`` (e.g. ``"ask_"``) wins.
+    ``volume`` is absent from the result when the frame has none.
     """
-    if prefix is None:
-        prefix = "bid_" if "bid_open" in df.columns else ""
+    cols = set(df.columns)
+    if prefix is not None:
+        style = lambda n: f"{prefix}{n}"
+    elif "bid_open" in cols:
+        style = lambda n: f"bid_{n}"
+    elif "open" in cols:
+        style = lambda n: n
+    elif "Open" in cols:
+        style = lambda n: n.title()
+    else:
+        raise KeyError(f"no OHLC columns found in {sorted(cols)}; expected "
+                       "Open/High/Low/Close, open/high/low/close or bid_open/...")
+    out = {n: style(n) for n in ("open", "high", "low", "close")}
+    missing = [c for c in out.values() if c not in cols]
+    if missing:
+        raise KeyError(f"frame is missing OHLC columns {missing}; has {sorted(cols)}")
+    if style("volume") in cols:
+        out["volume"] = style("volume")
+    return out
+
+
+def to_bid_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """A frame with ``bid_open/high/low/close[/volume]`` columns (rename only).
+
+    The setup finders and strategies read the Dukascopy-style ``bid_*``
+    columns; this lets a priceData frame (already BID) go through unchanged.
+    """
+    if "bid_open" in df.columns:
+        return df
+    cols = ohlc_columns(df)
+    return df[list(cols.values())].rename(columns={v: f"bid_{k}" for k, v in cols.items()})
+
+
+def bars_block(df: pd.DataFrame, prefix: str | None = None,
+               include_volume: bool = False, digits: int = 8) -> dict:
+    """Bars frame -> chart spec bar block (vectorized).
+
+    Prices are rounded to ``digits`` decimals (default 8) only to strip float
+    noise. ⚠ Never round to fewer decimals than the instrument quotes: 4 dp is
+    one whole pip on a 5-digit FX pair and distorts most M1-M15 candles.
+
+    ``include_volume`` defaults to False; pass True to add the volume series
+    (the viewer then shows the histogram pane and toggle).
+    """
+    cols = ohlc_columns(df, prefix)
 
     def col(name: str):
-        return df[f"{prefix}{name}"].to_numpy(dtype=float)
+        return np.round(df[cols[name]].to_numpy(dtype=float), digits).tolist()
 
-    block = {
-        "time": _epochs(_utc_index(df)),
-        "open": np.round(col("open"), 4).tolist(),
-        "high": np.round(col("high"), 4).tolist(),
-        "low": np.round(col("low"), 4).tolist(),
-        "close": np.round(col("close"), 4).tolist(),
-    }
-    vol = f"{prefix}volume"
-    if include_volume and vol in df.columns:
-        block["volume"] = [float(x) for x in df[vol].to_numpy()]
+    block = {"time": _epochs(_utc_index(df)), "open": col("open"), "high": col("high"),
+             "low": col("low"), "close": col("close")}
+    if include_volume and "volume" in cols:
+        block["volume"] = [float(x) for x in df[cols["volume"]].to_numpy()]
     return block
 
 
@@ -95,8 +134,8 @@ def equity_block(equity) -> dict | None:
     }
 
 
-def indicator(name: str, values, color: str, width: int = 1) -> dict:
-    clean = [None if v is None or (isinstance(v, float) and np.isnan(v)) else round(float(v), 4)
+def indicator(name: str, values, color: str, width: int = 1, digits: int = 8) -> dict:
+    clean = [None if v is None or (isinstance(v, float) and np.isnan(v)) else round(float(v), digits)
              for v in values]
     return {"name": name, "color": color, "width": width, "values": clean}
 

@@ -2,11 +2,11 @@
 
 Run from the repository root::
 
-    python3 -m unittest discover -s tests -v
+    python -m unittest discover -s tests -v
 
 or directly::
 
-    python3 tests/test_chart.py
+    python tests/test_chart.py
 """
 from __future__ import annotations
 
@@ -283,16 +283,16 @@ class TestCompact(unittest.TestCase):
         raw = __import__("base64").b64decode(b)
         return list(__import__("struct").unpack("<%dI" % (len(raw) // 4), raw))
 
-    def _decode_i32(self, b):
+    def _decode_i32(self, b, scale):
         raw = __import__("base64").b64decode(b)
-        return [x / 10000 for x in __import__("struct").unpack("<%di" % (len(raw) // 4), raw)]
+        return [x / scale for x in __import__("struct").unpack("<%di" % (len(raw) // 4), raw)]
 
     def test_encode_block_roundtrip(self):
         block = _bars(3)
         enc = chart.encode_block(block)
         self.assertEqual(self._decode_u32(enc["t"]), block["time"])
-        self.assertEqual(self._decode_i32(enc["o"]), block["open"])
-        self.assertEqual(self._decode_i32(enc["c"]), block["close"])
+        self.assertEqual(self._decode_i32(enc["o"], enc["s"]), block["open"])
+        self.assertEqual(self._decode_i32(enc["c"], enc["s"]), block["close"])
 
     def test_compact_page_is_smaller(self):
         s = chart.spec("X", {"D1": _bars(50)})
@@ -303,6 +303,147 @@ class TestCompact(unittest.TestCase):
             html = small.read_text(encoding="utf-8")
             self.assertIn('"t":"', html)
             self.assertNotIn('"time":[', html)
+
+
+def _fx_bars(n=5, start=1704067200):
+    """5-digit FX prices, the case a fixed 4 dp rounding destroys."""
+    base = [1.14454, 1.14463, 1.14438, 1.14448, 1.14446]
+    return {
+        "time": [start + i * 900 for i in range(n)],
+        "open": [base[i % 5] for i in range(n)],
+        "high": [base[i % 5] + 0.00017 for i in range(n)],
+        "low": [base[i % 5] - 0.00013 for i in range(n)],
+        "close": [base[(i + 1) % 5] for i in range(n)],
+    }
+
+
+class TestPrecision(unittest.TestCase):
+    def test_inferred_per_instrument(self):
+        self.assertEqual(chart.infer_precision([1.14585, 1.1459]), 5)     # 5-digit FX
+        self.assertEqual(chart.infer_precision([158.967, 159.0]), 3)      # JPY
+        self.assertEqual(chart.infer_precision([4290.95, 4300.0]), 2)     # gold
+        self.assertEqual(chart.infer_precision([126186.8]), 2)            # floor is 2
+
+    def test_floor_cap_and_nulls(self):
+        self.assertEqual(chart.infer_precision([2050.0, 2051.0]), 2)
+        self.assertEqual(chart.infer_precision([1.123456789012]), chart.MAX_PRECISION)
+        self.assertEqual(chart.infer_precision([None, float("nan"), 1.25]), 2)
+
+    def test_float_noise_is_not_precision(self):
+        # 1.1 + 2.2 style noise must not read as 15 decimals
+        self.assertEqual(chart.infer_precision([0.1 + 0.2, 1.1 + 2.2]), 2)
+
+    def test_scans_every_value_not_a_sample(self):
+        vals = [1.5] * 10000 + [1.23456]
+        self.assertEqual(chart.infer_precision(vals), 5)
+
+    def test_spec_carries_and_normalize_infers(self):
+        s = chart.spec("EURUSD", {"M15": _fx_bars()})
+        self.assertEqual(s["precision"], 5)
+        raw = {"symbol": "X", "timeframes": {"M15": _fx_bars()}}
+        self.assertEqual(chart.normalize(raw)["precision"], 5)
+        self.assertEqual(chart.spec("X", {"D1": _bars(3)})["precision"], 2)
+
+    def test_explicit_precision_respected_and_checked(self):
+        self.assertEqual(chart.spec("X", {"D1": _bars(3)}, precision=4)["precision"], 4)
+        raw = {"symbol": "X", "precision": 3, "timeframes": {"D1": _bars(3)}}
+        self.assertEqual(chart.normalize(raw)["precision"], 3)
+        for bad in (-1, 9, 2.5, "5", True):
+            with self.assertRaises(ValueError):
+                chart.spec("X", {"D1": _bars(3)}, precision=bad)
+
+    def test_validate_flags_bad_precision(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        s["precision"] = 12
+        self.assertTrue(any("precision" in p for p in chart.validate(s)))
+
+    def test_compact_is_lossless_for_5_digit_fx(self):
+        block = _fx_bars()
+        enc = chart.encode_block(block)
+        self.assertEqual(enc["s"], 100000)
+        dec = TestCompact()._decode_i32
+        for key, short in (("open", "o"), ("high", "h"), ("low", "l"), ("close", "c")):
+            self.assertEqual(dec(enc[short], enc["s"]), block[key])
+
+    def test_compact_page_round_trips_spec_precision(self):
+        s = chart.spec("EURUSD", {"M15": _fx_bars()})
+        with tempfile.TemporaryDirectory() as tmp:
+            html = chart.render(s, Path(tmp) / "p.html", compact=True).read_text(encoding="utf-8")
+        self.assertIn('"precision":5', html)
+        self.assertIn('"s":100000', html)
+
+    def test_compact_headroom_for_big_prices(self):
+        # BTC above the old fixed-1e4 int32 ceiling (214,748) still encodes
+        block = {"time": [1], "open": [250000.5], "high": [250001.0], "low": [249999.0],
+                 "close": [250000.0]}
+        enc = chart.encode_block(block)
+        self.assertEqual(TestCompact()._decode_i32(enc["o"], enc["s"]), [250000.5])
+
+    def test_compact_overflow_is_a_clear_error_not_silent_rounding(self):
+        block = {"time": [1], "open": [250000.123456], "high": [250000.123456],
+                 "low": [250000.123456], "close": [250000.123456]}
+        with self.assertRaises(ValueError) as ctx:
+            chart.encode_block(block)
+        self.assertIn("compact", str(ctx.exception))
+
+    def test_viewer_uses_precision_everywhere(self):
+        html = (chart.ASSETS / chart.VIEWER_NAME).read_text(encoding="utf-8")
+        self.assertIn("priceFormat:priceFmt()", html)      # candles + indicator lines
+        self.assertIn("b.s||1e4", html)                    # per-block scale, old pages still decode
+        self.assertNotIn("toFixed(3)", html)               # the hard-coded 3-decimal readouts
+        self.assertIn("inferPrec", html)                   # specs without a precision field
+
+
+class TestDisplayTimezone(unittest.TestCase):
+    """Spec times are always UTC; ``tz`` is only how the viewer shows them."""
+
+    def test_default_is_malaysian_time_and_data_stays_utc(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        self.assertEqual(s["tz"], "MYT")
+        self.assertEqual(s["timeframes"]["D1"]["time"][0], 1704067200)     # untouched, not shifted +8h
+        self.assertEqual(chart.spec("X", {"D1": _bars(3)}, tz="UTC")["tz"], "UTC")
+
+    def test_source_is_recorded_only_when_given(self):
+        self.assertNotIn("source", chart.spec("X", {"D1": _bars(3)}))
+        self.assertEqual(chart.spec("X", {"D1": _bars(3)}, source="dukascopy")["source"], "dukascopy")
+
+    def test_normalize_fills_tz_and_keeps_source(self):
+        raw = {"symbol": "X", "source": "ftmo", "timeframes": {"D1": _bars(3)}}
+        n = chart.normalize(raw)
+        self.assertEqual((n["tz"], n["source"]), ("MYT", "ftmo"))
+        self.assertEqual(chart.normalize(dict(raw, tz="UTC"))["tz"], "UTC")
+
+    def test_bad_tz_is_refused_everywhere(self):
+        with self.assertRaises(ValueError):
+            chart.spec("X", {"D1": _bars(3)}, tz="EST")
+        with self.assertRaises(ValueError):
+            chart.normalize({"symbol": "X", "tz": "GMT+9", "timeframes": {"D1": _bars(3)}})
+        s = chart.spec("X", {"D1": _bars(3)})
+        s["tz"] = "EST"
+        self.assertTrue(any("tz must be" in p for p in chart.validate(s)))
+
+    def test_to_iso_displays_in_the_requested_zone(self):
+        self.assertEqual(chart.to_iso(1704067200), "2024-01-01 00:00")
+        self.assertEqual(chart.to_iso(1704067200, "MYT"), "2024-01-01 08:00")
+        self.assertEqual(chart.to_iso(1704067200, "MYT", True), "2024-01-01 08:00 MYT")
+        self.assertEqual(chart.to_iso(1704067200 - 1, "MYT"), "2024-01-01 07:59")
+        with self.assertRaises(ValueError):
+            chart.to_iso(0, "PST")
+
+    def test_the_page_carries_tz_and_the_viewer_can_switch_it(self):
+        s = chart.spec("X", {"D1": _bars(3)}, tz="UTC", source="ftmo")
+        with tempfile.TemporaryDirectory() as tmp:
+            html = chart.render(s, Path(tmp) / "p.html").read_text(encoding="utf-8")
+        self.assertIn('"tz":"UTC"', html)
+        self.assertIn('"source":"ftmo"', html)
+        for needle in ('data-tz="MYT"', 'data-tz="UTC"', "function switchTZ", "chartlab.tz",
+                       '"MYT":28800', "URLSearchParams(location.search).get(\"tz\")"):
+            self.assertIn(needle, html, needle)
+
+    def test_viewer_shifts_display_only_and_keeps_a_utc_offset_handle(self):
+        html = (chart.ASSETS / chart.VIEWER_NAME).read_text(encoding="utf-8")
+        self.assertIn("function shiftTimes", html)            # one in-place shift of every time array
+        self.assertIn("tzOffset:OFF", html)                   # debug() exposes the applied offset
 
 
 class TestLoader(unittest.TestCase):

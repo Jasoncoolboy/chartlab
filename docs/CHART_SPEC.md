@@ -3,10 +3,15 @@
 A chart is a single JSON object. `chart.render(spec, out.html)` reads it, inlines it
 into the viewer template, and writes a self-contained interactive page.
 
+> **Every time in a spec is a true UTC epoch** — bars, trades, zones, equity. `tz` only
+> changes how the viewer displays them. If your data is in another clock, convert it first:
+> FTMO priceData is **server time** (UTC+2, UTC+3 in US DST); `chartlab.sources` /
+> `chartlab.pricedata` do that conversion for you.
+
 Validate before rendering:
 
 ```bash
-python3 chart.py validate spec.json
+python chart.py validate spec.json
 ```
 
 or programmatically with `chart.validate(spec)` (returns a list of problems; empty = valid).
@@ -26,6 +31,9 @@ or programmatically with `chart.validate(spec)` (returns a list of problems; emp
 | `indicators`       | object            | no       | Map of timeframe → list of **indicator** objects. |
 | `stats`            | list or object    | no       | Metrics panel (top-right); see below. |
 | `title`            | string            | no       | Overrides the page `<title>`. |
+| `tz`               | `"MYT"` / `"UTC"` | no       | How the viewer DISPLAYS times when the page opens (default `MYT`, Malaysian time, UTC+8). The data is never shifted; the page also has MYT / UTC buttons, `?tz=UTC` in the URL, and remembers the last choice. |
+| `source`           | string            | no       | Where the bars came from: `"ftmo"` or `"dukascopy"` (informational; set by the adapters). |
+| `precision`        | int 0–8           | no       | Price decimals shown on the axis, legends and trade labels, and the scale compact encoding uses. Inferred from the bars when absent (`spec()`/`normalize()` write it; the viewer infers it for hand-written or loader specs): 5 for 5-digit FX, 3 for JPY, 2 for gold, never below 2. Set it explicitly only to show fewer or more digits than the data has. |
 
 The chart opens on `defaultTimeframe` and switches between the provided timeframes
 without reloading.
@@ -152,13 +160,15 @@ appear only for indicators present in the spec.
 
 ## Times
 
-`time` values are always **epoch seconds in UTC**. The builder helpers also accept:
+`time` values are always **epoch seconds in UTC**. Session timings are UTC based, so nothing
+in the spec is ever shifted to a display zone. The builder helpers also accept:
 
 - an integer/float epoch (returned as-is),
 - an ISO-8601 string such as `"2024-01-01T00:00:00Z"`,
 - a `datetime` (`tzinfo` assumed UTC when naive).
 
-`chart.to_epoch(value)` performs the conversion; `chart.to_iso(seconds)` formats one back.
+`chart.to_epoch(value)` performs the conversion; `chart.to_iso(seconds, tz="UTC", suffix=False)`
+formats one back in `UTC` or `MYT`.
 
 ## Programmatic construction
 
@@ -197,6 +207,8 @@ render(s, "out.html", title="XAUUSD D1", inline_lib=False)
 | `stats_from_rows(rows)` | rows / `{label: value}` → normalized stats |
 | `encode_block(block)` / `encode_timeframes(blocks)` | bar block(s) → compact base64 |
 | `bars_from_csv(path, ...)` | CSV → bar block (auto-detects columns) |
+| `infer_precision(*series)` | decimals needed to show every price exactly (floor 2, cap 8) |
+| `TIMEZONES`, `DEFAULT_TZ` | the display zones (`UTC`, `MYT` = +28800 s) and the default (`MYT`) |
 | `trades_from_csv(path)` / `equity_from_csv(path)` | CSV → trades / equity |
 | `parse_indicators("SMA50,EMA200,BB20,RSI14,MACD")` | shorthand → indicator definitions |
 | `spec(...)` | assemble a validated spec |
@@ -218,8 +230,11 @@ render(s, "out.html", title="XAUUSD D1", inline_lib=False)
 - `lib_dir` — directory (relative to the page) that holds the chart library. Use
   this to make many nested pages share one copy, e.g. `lib_dir="../../lib"`.
 - `compact=True` — base64-encode each bar block (absolute `uint32` time + prices
-  scaled by `1e4`) for a page roughly 3x smaller. The JSON is no longer human
-  readable but renders identically; the payload stays `<`-escaped.
+  stored as `int32` at `10**precision`, the scale travelling in the block as `s`) for a
+  page roughly 3x smaller. Decoding is exact at the spec's precision; a price that
+  would overflow `int32` at that scale raises `ValueError` instead of being rounded.
+  Pages written before 0.3.0 have no `s` and decode at `1e4`. The JSON is no longer
+  human readable but renders identically; the payload stays `<`-escaped.
 
 ## Loading the spec at runtime
 
@@ -233,7 +248,7 @@ baked-in URL — useful for previewing any spec from one page.
 
 ```bash
 # Write loader.html; it fetches specs/xau.json next to itself when opened.
-python3 chart.py loader specs/xau.json loader.html --title "XAUUSD"
+python chart.py loader specs/xau.json loader.html --title "XAUUSD"
 # or the same page with an override:
 #   loader.html?spec=https://example.com/other.json
 ```

@@ -30,6 +30,11 @@ VIEWER_NAME = "viewer.html"
 LIB_NAME = "lightweight-charts.standalone.production.js"
 SPEC_VERSION = 1
 
+# Every time in a spec is a true UTC epoch. ``tz`` only says how the viewer DISPLAYS
+# them (the viewer also lets the user switch). MYT = Malaysian time, UTC+8, no DST.
+TIMEZONES = {"UTC": 0, "MYT": 8 * 3600}
+DEFAULT_TZ = "MYT"
+
 _TF_COMPACT = {"t": "time", "o": "open", "h": "high", "l": "low",
                "c": "close", "v": "volume"}
 
@@ -58,8 +63,12 @@ def to_epoch(value) -> int:
     return int(dt.timestamp())
 
 
-def to_iso(seconds) -> str:
-    return datetime.fromtimestamp(int(seconds), tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+def to_iso(seconds, tz: str = "UTC", suffix: bool = False) -> str:
+    """Epoch seconds -> ``YYYY-MM-DD HH:MM`` shown in ``tz`` (UTC or MYT)."""
+    if tz not in TIMEZONES:
+        raise ValueError(f"unknown tz {tz!r}; use one of {list(TIMEZONES)}")
+    text = datetime.fromtimestamp(int(seconds) + TIMEZONES[tz], tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return f"{text} {tz}" if suffix else text
 
 
 # --------------------------------------------------------------------------
@@ -249,8 +258,56 @@ def stats_from_rows(rows) -> list:
 # --------------------------------------------------------------------------
 # compact (base64) payload encoding — opt-in, ~3x smaller than readable JSON
 # --------------------------------------------------------------------------
-_PRICE_SCALE = 10000
+_INT32_MAX = 2147483647
 _UINT32_MAX = 4294967295
+
+# Price precision: how many decimals the axis, legends and labels show, and the
+# scale compact encoding stores prices at. 5-digit FX needs 5; gold 2; JPY 3.
+MIN_PRECISION = 2
+MAX_PRECISION = 8
+
+
+def _finite(v) -> bool:
+    return v is not None and not isinstance(v, bool) and math.isfinite(float(v))
+
+
+def infer_precision(*series, floor: int = MIN_PRECISION, cap: int = MAX_PRECISION) -> int:
+    """Decimals needed to show every price in ``series`` exactly.
+
+    Scans every value (a sample could miss a rare longer price and make compact
+    encoding lossy). Never below ``floor`` (default 2) nor above ``cap``;
+    null/NaN entries are skipped. ``infer_precision([1.14585, 1.1459])`` is 5.
+    """
+    need = floor
+    for values in series:
+        for v in values:
+            if not _finite(v):
+                continue
+            v = float(v)
+            tol = 1e-9 * max(1.0, abs(v))
+            while need < cap and abs(round(v, need) - v) > tol:
+                need += 1
+            if need >= cap:
+                return cap
+    return need
+
+
+def _spec_precision(blocks: dict) -> int:
+    return infer_precision(*(b[k] for b in blocks.values()
+                             for k in ("open", "high", "low", "close")))
+
+
+def _check_tz(value) -> str:
+    if value not in TIMEZONES:
+        raise ValueError(f"tz must be one of {list(TIMEZONES)}, got {value!r}")
+    return value
+
+
+def _check_precision(value) -> int:
+    if (isinstance(value, bool) or not isinstance(value, int)
+            or not 0 <= value <= MAX_PRECISION):
+        raise ValueError(f"precision must be an integer 0..{MAX_PRECISION}, got {value!r}")
+    return value
 
 
 def _b64_ints(values, signed: bool) -> str:
@@ -258,25 +315,32 @@ def _b64_ints(values, signed: bool) -> str:
     return base64.b64encode(struct.pack(fmt, *values)).decode("ascii")
 
 
-def _scaled_ints(values, key: str) -> list:
+def _scaled_ints(values, key: str, scale: int) -> list:
     out = []
     for v in values:
         if v is None or (isinstance(v, float) and not math.isfinite(v)):
             raise ValueError(
                 f"compact encoding needs finite {key} values; found "
                 f"{'null' if v is None else 'NaN/Inf'}")
-        out.append(int(round(float(v) * _PRICE_SCALE)))
+        n = int(round(float(v) * scale))
+        if abs(n) > _INT32_MAX:
+            raise ValueError(
+                f"compact encoding stores prices as int32 at {scale:g}x; {key} "
+                f"value {v} does not fit. Render without compact=True, or pass "
+                "a lower precision if the extra decimals are noise")
+        out.append(n)
     return out
 
 
-def encode_block(block: dict) -> dict:
+def encode_block(block: dict, precision: int | None = None) -> dict:
     """Encode a canonical bar block as base64 int arrays.
 
-    Times stay absolute epoch seconds (uint32) and prices are scaled by 1e4
-    (int32); the viewer's ``decodeBlock`` reverses this exactly for four
-    decimal places, which is plenty for FX/metals. Volume, when present, is
-    left as-is. Raises ``ValueError`` for null/NaN prices or timestamps that
-    do not fit uint32.
+    Times stay absolute epoch seconds (uint32). Prices are stored as int32 at
+    ``10**precision`` (the block's own inferred precision when omitted) and the
+    scale travels in the block as ``s``, so the viewer's ``decodeBlock``
+    reverses it exactly. Volume, when present, is left as-is. Raises
+    ``ValueError`` for null/NaN prices, timestamps that do not fit uint32, or
+    prices that overflow int32 at that scale (never silently rounds them).
     """
     times = [int(t) for t in block["time"]]
     if any(t < 0 or t > _UINT32_MAX for t in times):
@@ -284,16 +348,19 @@ def encode_block(block: dict) -> dict:
         raise ValueError(
             "compact encoding stores time as uint32 seconds; timestamp "
             f"{bad} is out of range (supported 0..{_UINT32_MAX})")
-    out = {"t": _b64_ints(times, False)}
+    if precision is None:
+        precision = infer_precision(*(block[k] for k in ("open", "high", "low", "close")))
+    scale = 10 ** _check_precision(precision)
+    out = {"t": _b64_ints(times, False), "s": scale}
     for key, short in (("open", "o"), ("high", "h"), ("low", "l"), ("close", "c")):
-        out[short] = _b64_ints(_scaled_ints(block[key], key), True)
+        out[short] = _b64_ints(_scaled_ints(block[key], key, scale), True)
     if block.get("volume"):
         out["v"] = block["volume"]
     return out
 
 
-def encode_timeframes(blocks: dict) -> dict:
-    return {tf: encode_block(b) for tf, b in blocks.items()}
+def encode_timeframes(blocks: dict, precision: int | None = None) -> dict:
+    return {tf: encode_block(b, precision) for tf, b in blocks.items()}
 
 
 # --------------------------------------------------------------------------
@@ -301,8 +368,17 @@ def encode_timeframes(blocks: dict) -> dict:
 # --------------------------------------------------------------------------
 def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = "",
          default_tf: str | None = None, trades=None, zones=None, equity=None,
-         indicators=None, stats=None, title: str | None = None) -> dict:
-    """Assemble and validate a chart spec from flexible inputs."""
+         indicators=None, stats=None, title: str | None = None,
+         precision: int | None = None, source: str | None = None,
+         tz: str | None = None) -> dict:
+    """Assemble and validate a chart spec from flexible inputs.
+
+    ``precision`` is the number of price decimals the viewer shows; when
+    omitted it is inferred from the bars (5 for FX, 2 for gold, ...).
+    All times must be true UTC epochs. ``tz`` (UTC or MYT, default MYT) is only
+    how the viewer displays them; ``source`` ("ftmo"/"dukascopy") records where
+    the bars came from.
+    """
     if not timeframes:
         raise ValueError("timeframes must not be empty")
     blocks = {}
@@ -342,7 +418,12 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
         "equity": eq,
         "indicators": ind_map,
         "stats": stats_from_rows(stats) if stats else [],
+        "precision": (_spec_precision(blocks) if precision is None
+                      else _check_precision(precision)),
+        "tz": _check_tz(tz or DEFAULT_TZ),
     }
+    if source:
+        out["source"] = str(source)
     if title is not None:
         out["title"] = str(title)
     return out
@@ -403,6 +484,13 @@ def validate(s: dict) -> list:
     dft = s.get("defaultTimeframe")
     if dft and dft not in tfs:
         problems.append(f"defaultTimeframe {dft!r} not present")
+    if s.get("precision") is not None:
+        try:
+            _check_precision(s["precision"])
+        except ValueError as exc:
+            problems.append(str(exc))
+    if s.get("tz") is not None and s["tz"] not in TIMEZONES:
+        problems.append(f"tz must be one of {list(TIMEZONES)}, got {s['tz']!r}")
 
     eq = s.get("equity")
     if eq:
@@ -464,6 +552,9 @@ def normalize(s: dict) -> dict:
         else:
             out["indicators"] = {tf: indicators_from_rows(v) for tf, v in inds.items()}
 
+    out["precision"] = (_spec_precision(blocks) if s.get("precision") is None
+                        else _check_precision(s["precision"]))
+    out["tz"] = _check_tz(s.get("tz") or DEFAULT_TZ)
     out["version"] = int(out.get("version") or SPEC_VERSION)
     out.setdefault("symbol", "Chart")
     out.setdefault("exchange", "")
@@ -504,7 +595,8 @@ def _emit(out_path, *, viewer_path, lib_path, title, spec, spec_url,
     else:
         if compact:
             spec = dict(spec)
-            spec["timeframes"] = encode_timeframes(spec["timeframes"])
+            spec["timeframes"] = encode_timeframes(spec["timeframes"],
+                                                   spec.get("precision"))
         # Escape '<' so a value like "</script>" cannot terminate the block.
         data = json.dumps(spec, separators=(",", ":")).replace("<", "\\u003c")
 
