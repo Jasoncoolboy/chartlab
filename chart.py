@@ -14,7 +14,10 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import html as _html
 import json
+import math
+import re
 import shutil
 import struct
 import sys
@@ -62,7 +65,7 @@ def to_iso(seconds) -> str:
 # --------------------------------------------------------------------------
 # normalization helpers
 # --------------------------------------------------------------------------
-def _num_list(values, key):
+def _num_list(values):
     out = []
     for v in values:
         if v is None or v == "":
@@ -81,10 +84,10 @@ def _bars_from_block(block: dict) -> dict:
         raise ValueError(f"bar block missing keys: {missing}")
     out = {
         "time": [to_epoch(x) for x in src["time"]],
-        "open": _num_list(src["open"], "open"),
-        "high": _num_list(src["high"], "high"),
-        "low": _num_list(src["low"], "low"),
-        "close": _num_list(src["close"], "close"),
+        "open": _num_list(src["open"]),
+        "high": _num_list(src["high"]),
+        "low": _num_list(src["low"]),
+        "close": _num_list(src["close"]),
     }
     if src.get("volume") is not None:
         out["volume"] = [None if v is None else float(v) for v in src["volume"]]
@@ -247,11 +250,23 @@ def stats_from_rows(rows) -> list:
 # compact (base64) payload encoding — opt-in, ~3x smaller than readable JSON
 # --------------------------------------------------------------------------
 _PRICE_SCALE = 10000
+_UINT32_MAX = 4294967295
 
 
 def _b64_ints(values, signed: bool) -> str:
     fmt = "<%d%s" % (len(values), "i" if signed else "I")
     return base64.b64encode(struct.pack(fmt, *values)).decode("ascii")
+
+
+def _scaled_ints(values, key: str) -> list:
+    out = []
+    for v in values:
+        if v is None or (isinstance(v, float) and not math.isfinite(v)):
+            raise ValueError(
+                f"compact encoding needs finite {key} values; found "
+                f"{'null' if v is None else 'NaN/Inf'}")
+        out.append(int(round(float(v) * _PRICE_SCALE)))
+    return out
 
 
 def encode_block(block: dict) -> dict:
@@ -260,13 +275,18 @@ def encode_block(block: dict) -> dict:
     Times stay absolute epoch seconds (uint32) and prices are scaled by 1e4
     (int32); the viewer's ``decodeBlock`` reverses this exactly for four
     decimal places, which is plenty for FX/metals. Volume, when present, is
-    left as-is.
+    left as-is. Raises ``ValueError`` for null/NaN prices or timestamps that
+    do not fit uint32.
     """
     times = [int(t) for t in block["time"]]
+    if any(t < 0 or t > _UINT32_MAX for t in times):
+        bad = next(t for t in times if t < 0 or t > _UINT32_MAX)
+        raise ValueError(
+            "compact encoding stores time as uint32 seconds; timestamp "
+            f"{bad} is out of range (supported 0..{_UINT32_MAX})")
     out = {"t": _b64_ints(times, False)}
     for key, short in (("open", "o"), ("high", "h"), ("low", "l"), ("close", "c")):
-        out[short] = _b64_ints(
-            [int(round(float(v) * _PRICE_SCALE)) for v in block[key]], True)
+        out[short] = _b64_ints(_scaled_ints(block[key], key), True)
     if block.get("volume"):
         out["v"] = block["volume"]
     return out
@@ -345,26 +365,60 @@ def _norm_equity(eq) -> dict:
     }
 
 
+def _bad_number(v) -> bool:
+    if v is None:
+        return True
+    try:
+        return not math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return True
+
+
 def validate(s: dict) -> list:
     """Return a list of human-readable problems; empty means valid."""
     problems = []
     if not isinstance(s, dict):
         return ["spec is not an object"]
-    if not s.get("timeframes"):
+    tfs = s.get("timeframes") or {}
+    if not tfs:
         problems.append("no timeframes")
-    for tf, b in (s.get("timeframes") or {}).items():
+    for tf, b in tfs.items():
         n = len(b.get("time", []))
         for key in ("open", "high", "low", "close"):
-            if len(b.get(key, [])) != n:
-                problems.append(f"{tf}.{key} length {len(b.get(key, []))} != time {n}")
+            values = b.get(key, [])
+            if len(values) != n:
+                problems.append(f"{tf}.{key} length {len(values)} != time {n}")
+            elif any(_bad_number(v) for v in values):
+                problems.append(f"{tf}.{key} contains null/NaN values")
         if b.get("volume") and len(b["volume"]) != n:
             problems.append(f"{tf}.volume length != time")
         tt = b.get("time", [])
-        if any(tt[i] > tt[i + 1] for i in range(len(tt) - 1)):
-            problems.append(f"{tf}.time is not ascending")
+        for i in range(len(tt) - 1):
+            if tt[i] > tt[i + 1]:
+                problems.append(f"{tf}.time is not ascending")
+                break
+            if tt[i] == tt[i + 1]:
+                problems.append(f"{tf}.time has duplicate timestamps")
+                break
     dft = s.get("defaultTimeframe")
-    if dft and dft not in (s.get("timeframes") or {}):
+    if dft and dft not in tfs:
         problems.append(f"defaultTimeframe {dft!r} not present")
+
+    eq = s.get("equity")
+    if eq:
+        eq_t, eq_v = eq.get("time", []), eq.get("value", [])
+        if len(eq_t) != len(eq_v):
+            problems.append(f"equity length {len(eq_v)} != time {len(eq_t)}")
+        elif any(_bad_number(v) for v in eq_v):
+            problems.append("equity contains null/NaN values")
+
+    for tf, defs in (s.get("indicators") or {}).items():
+        n = len((tfs.get(tf) or {}).get("time", []))
+        for ind in defs:
+            vals = ind.get("values")
+            if vals is not None and len(vals) != n:
+                name = ind.get("name") or ind.get("type") or "indicator"
+                problems.append(f"{tf}.{name} values length {len(vals)} != time {n}")
     return problems
 
 
@@ -507,7 +561,6 @@ def render_file(spec_path, out_path, **kw) -> Path:
 # gallery index
 # --------------------------------------------------------------------------
 def _page_title(path: Path) -> str:
-    import re
     try:
         with path.open("r", encoding="utf-8", errors="ignore") as fh:
             head = fh.read(4096)
@@ -532,13 +585,17 @@ def gallery(out_root, *, title="Charts", subtitle="", recurse_dir="setups") -> P
             if idx.exists():
                 rel = idx.relative_to(root).as_posix()
                 catalogs.append((_page_title(idx), rel))
-    rows = "".join(f"<li><a href='{rel}'>{name}</a></li>" for name, rel in charts)
+    def link(name, rel):
+        return (f"<li><a href='{_html.escape(rel, quote=True)}'>"
+                f"{_html.escape(name)}</a></li>")
+    rows = "".join(link(name, rel) for name, rel in charts)
     top = f"<h3>Pages</h3><ul class='plain'>{rows}</ul>" if charts else ""
-    crows = "".join(f"<li><a href='{rel}'>{name}</a></li>" for name, rel in catalogs)
+    crows = "".join(link(name, rel) for name, rel in catalogs)
     cat = f"<h3>Setup catalogs</h3><ul class='plain'>{crows}</ul>" if crows else ""
+    etitle, esub = _html.escape(title), _html.escape(subtitle)
     html = (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        f"<title>{title}</title><style>"
+        f"<title>{etitle}</title><style>"
         "body{background:#0e1117;color:#d1d4dc;font:13px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;"
         "padding:26px;max-width:980px;margin:0 auto}"
         "h1{color:#fff;font-size:20px;font-weight:600}"
@@ -546,7 +603,7 @@ def gallery(out_root, *, title="Charts", subtitle="", recurse_dir="setups") -> P
         "h3{color:#787b86;font-size:12px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}"
         "ul{list-style:none;padding:0;columns:2;column-gap:30px}"
         "li{margin:2px 0}a{color:#2962ff;text-decoration:none}a:hover{text-decoration:underline}"
-        f"</style></head><body><h1>{title}</h1><h2>{subtitle}</h2>{top}{cat}</body></html>"
+        f"</style></head><body><h1>{etitle}</h1><h2>{esub}</h2>{top}{cat}</body></html>"
     )
     dest = root / "index.html"
     dest.write_text(html, encoding="utf-8")
@@ -569,18 +626,29 @@ def _first_present(fieldnames, *names):
     return None
 
 
+def _at(cols, index):
+    return cols[index] if index < len(cols) else None
+
+
 def bars_from_csv(path, time=None, open=None, high=None, low=None,
                   close=None, volume=None) -> dict:
     rows = _read_rows(path)
     if not rows:
         return {"time": [], "open": [], "high": [], "low": [], "close": []}
     cols = list(rows[0].keys())
-    time = time or _first_present(cols, "time", "date", "datetime", "timestamp") or cols[0]
-    open = open or _first_present(cols, "open", "o", "bid_open") or cols[1]
-    high = high or _first_present(cols, "high", "h", "bid_high") or cols[2]
-    low = low or _first_present(cols, "low", "l", "bid_low") or cols[3]
-    close = close or _first_present(cols, "close", "c", "bid_close") or cols[4]
+    positional = len(cols) >= 5
+    time = time or _first_present(cols, "time", "date", "datetime", "timestamp") or _at(cols, 0)
+    open = open or _first_present(cols, "open", "o", "bid_open") or (_at(cols, 1) if positional else None)
+    high = high or _first_present(cols, "high", "h", "bid_high") or (_at(cols, 2) if positional else None)
+    low = low or _first_present(cols, "low", "l", "bid_low") or (_at(cols, 3) if positional else None)
+    close = close or _first_present(cols, "close", "c", "bid_close") or (_at(cols, 4) if positional else None)
     volume = volume or _first_present(cols, "volume", "v", "bid_volume")
+    missing = [name for name, col in (("time", time), ("open", open), ("high", high),
+                                      ("low", low), ("close", close)) if col is None]
+    if missing:
+        raise ValueError(
+            f"bars CSV {path} is missing columns for {', '.join(missing)}; "
+            f"found {cols}")
     return bars_from_rows(rows, time=time, open=open, high=high,
                           low=low, close=close, volume=volume)
 
@@ -604,23 +672,36 @@ def equity_from_csv(path) -> dict:
 
 
 _IND_COLORS = ["#e5a93d", "#4fc3f7", "#ba68c8", "#aed581", "#ff8a65"]
+_IND_RE = re.compile(r"^([A-Za-z]+)\s*(\d*)$")
+_IND_KINDS = {"SMA": "sma", "MA": "sma", "EMA": "ema", "BB": "bb",
+              "RSI": "rsi", "MACD": "macd"}
+_IND_PERIODS = {"bb": 20, "ema": 20, "sma": 20, "rsi": 14}
 
 
 def parse_indicators(text, colors=None) -> list:
-    """Parse 'SMA50,EMA200,BB20' into indicator definitions."""
+    """Parse 'SMA50,EMA200,BB20,RSI14,MACD' into indicator definitions.
+
+    A bare ``SMA``/``EMA``/``BB`` defaults to period 20 and ``RSI`` to 14;
+    ``MA`` is an alias for ``SMA``; ``MACD`` takes no period. Unsupported
+    names raise ``ValueError``.
+    """
     if not text:
         return []
     palette = colors or _IND_COLORS
     out = []
     for i, tok in enumerate(x.strip() for x in text.split(",") if x.strip()):
-        up = tok.upper()
-        color = palette[i % len(palette)]
-        if up.startswith("BB"):
-            out.append({"name": tok, "type": "bb", "color": color})
-        elif up.startswith("EMA"):
-            out.append({"name": tok, "type": "ema", "period": int(tok[3:]), "color": color})
-        else:
-            out.append({"name": tok, "type": "sma", "period": int(tok[3:]), "color": color})
+        m = _IND_RE.match(tok)
+        kind = _IND_KINDS.get(m.group(1).upper()) if m else None
+        if kind is None:
+            raise ValueError(
+                f"unsupported indicator {tok!r}: use SMA, EMA, BB, RSI or MACD, "
+                "optionally with a period (e.g. SMA50, EMA200, BB20, RSI14)")
+        defn = {"name": tok, "type": kind, "color": palette[i % len(palette)]}
+        if kind in _IND_PERIODS:
+            defn["period"] = int(m.group(2)) if m.group(2) else _IND_PERIODS[kind]
+        elif m.group(2):
+            raise ValueError(f"{tok!r} does not take a period")
+        out.append(defn)
     return out
 
 
@@ -656,6 +737,9 @@ def main(argv=None) -> int:
     p.add_argument("--bars", required=True)
     p.add_argument("--trades", default=None)
     p.add_argument("--equity", default=None)
+    p.add_argument("--zones", default=None, help="zones JSON file (list of zone objects)")
+    p.add_argument("--stats", default=None, help="stats JSON file (list or object)")
+    p.add_argument("--inds", default=None, help='comma list e.g. "SMA50,EMA200,RSI14,MACD"')
     p.add_argument("--symbol", default="")
     p.add_argument("--exchange", default="")
     p.add_argument("--timeframe", default="D1")
@@ -700,6 +784,11 @@ def main(argv=None) -> int:
         return 0
 
     bars = bars_from_csv(args.bars)
+    zones = (zones_from_rows(json.loads(Path(args.zones).read_text(encoding="utf-8")))
+             if args.zones else None)
+    stats = (stats_from_rows(json.loads(Path(args.stats).read_text(encoding="utf-8")))
+             if args.stats else None)
+    inds = parse_indicators(args.inds)
     s = spec(
         args.symbol or Path(args.bars).stem,
         {args.timeframe: bars},
@@ -707,7 +796,10 @@ def main(argv=None) -> int:
         period_label=args.period_label,
         default_tf=args.timeframe,
         trades=trades_from_csv(args.trades) if args.trades else None,
+        zones=zones,
         equity=equity_from_csv(args.equity) if args.equity else None,
+        indicators=inds or None,
+        stats=stats,
     )
     out = render(s, args.out, inline_lib=args.inline_lib, compact=args.compact)
     print(out)

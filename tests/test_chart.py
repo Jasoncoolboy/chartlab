@@ -2,11 +2,11 @@
 
 Run from the repository root::
 
-    python3 -m unittest discover -s chartlab/tests -v
+    python3 -m unittest discover -s tests -v
 
 or directly::
 
-    python3 chartlab/tests/test_chart.py
+    python3 tests/test_chart.py
 """
 from __future__ import annotations
 
@@ -210,6 +210,7 @@ class TestGalleryAndIndicators(unittest.TestCase):
         self.assertEqual([i["type"] for i in inds], ["sma", "ema", "bb"])
         self.assertEqual(inds[0]["period"], 50)
         self.assertEqual(inds[1]["period"], 200)
+        self.assertEqual(inds[2]["period"], 20)
 
 
 class TestNormalize(unittest.TestCase):
@@ -313,6 +314,141 @@ class TestLoader(unittest.TestCase):
             self.assertIn("lib/" + chart.LIB_NAME, html)
             self.assertNotIn("__SPEC_URL__", html)
             self.assertIn('<script id="payload" type="application/json">null</script>', html)
+
+
+class TestValidationHardening(unittest.TestCase):
+    def test_null_ohlc_flagged(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        s["timeframes"]["D1"]["close"][1] = None
+        self.assertTrue(any("null/NaN" in p for p in chart.validate(s)))
+
+    def test_nan_ohlc_flagged(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        s["timeframes"]["D1"]["high"][1] = float("nan")
+        self.assertTrue(any("null/NaN" in p for p in chart.validate(s)))
+
+    def test_duplicate_timestamps_flagged(self):
+        s = chart.spec("X", {"D1": _bars(3)})
+        s["timeframes"]["D1"]["time"][2] = s["timeframes"]["D1"]["time"][1]
+        self.assertTrue(any("duplicate" in p for p in chart.validate(s)))
+
+    def test_equity_length_mismatch_flagged(self):
+        s = chart.spec("X", {"D1": _bars(2)},
+                       equity={"time": [1, 2, 3], "value": [1.0, 2.0]})
+        self.assertTrue(any("equity length" in p for p in chart.validate(s)))
+
+    def test_indicator_length_mismatch_flagged(self):
+        s = chart.spec("X", {"D1": _bars(3)},
+                       indicators=[{"name": "SMA", "values": [1, 2]}])
+        self.assertTrue(any("SMA values length" in p for p in chart.validate(s)))
+
+    def test_valid_spec_still_clean(self):
+        self.assertEqual(chart.validate(chart.spec("X", {"D1": _bars(3)})), [])
+
+
+class TestEncodeHardening(unittest.TestCase):
+    def test_null_price_raises(self):
+        block = _bars(2)
+        block["close"][1] = None
+        with self.assertRaises(ValueError):
+            chart.encode_block(block)
+
+    def test_nan_price_raises(self):
+        block = _bars(2)
+        block["open"][1] = float("nan")
+        with self.assertRaises(ValueError):
+            chart.encode_block(block)
+
+    def test_out_of_range_time_raises(self):
+        block = _bars(1)
+        block["time"][0] = 5_000_000_000
+        with self.assertRaises(ValueError):
+            chart.encode_block(block)
+
+
+class TestCsvHardening(unittest.TestCase):
+    def test_narrow_csv_raises_named_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "b.csv"
+            p.write_text("date,close\n2024-01-01,1.5\n", encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                chart.bars_from_csv(p)
+            self.assertIn("missing columns", str(ctx.exception))
+            self.assertIn("high", str(ctx.exception))
+
+
+class TestIndicatorParsing(unittest.TestCase):
+    def test_bare_tokens_default(self):
+        inds = chart.parse_indicators("SMA,EMA,BB,RSI")
+        self.assertEqual([i["period"] for i in inds], [20, 20, 20, 14])
+
+    def test_ma_alias_and_rsi_macd(self):
+        inds = chart.parse_indicators("MA50,RSI14,MACD")
+        self.assertEqual([i["type"] for i in inds], ["sma", "rsi", "macd"])
+        self.assertEqual(inds[0]["period"], 50)
+        self.assertEqual(inds[1]["period"], 14)
+        self.assertNotIn("period", inds[2])
+
+    def test_unsupported_raises(self):
+        with self.assertRaises(ValueError):
+            chart.parse_indicators("ICHIMOKU")
+        with self.assertRaises(ValueError):
+            chart.parse_indicators("MACD9")
+
+
+class TestGalleryEscaping(unittest.TestCase):
+    def test_gallery_escapes_title(self):
+        s = chart.spec("X", {"D1": _bars(2)})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chart.render(s, root / "a.html", title="A")
+            idx = chart.gallery(root, title="<b>hi</b>", subtitle="<i>x</i>")
+            html = idx.read_text(encoding="utf-8")
+            self.assertIn("&lt;b&gt;hi&lt;/b&gt;", html)
+            self.assertNotIn("<b>hi</b>", html)
+
+
+class TestVolumeAndAnnotations(unittest.TestCase):
+    def test_volume_round_trips_and_encodes(self):
+        b = _bars(3)
+        b["volume"] = [10.0, 20.0, 30.0]
+        s = chart.spec("X", {"D1": b})
+        self.assertEqual(s["timeframes"]["D1"]["volume"], [10.0, 20.0, 30.0])
+        self.assertEqual(chart.validate(s), [])
+        self.assertEqual(chart.encode_block(s["timeframes"]["D1"])["v"], [10.0, 20.0, 30.0])
+
+    def test_from_csv_annotations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bars.csv").write_text(
+                "date,open,high,low,close\n"
+                "2024-01-01T00:00:00Z,1,2,0.5,1.5\n"
+                "2024-01-02T00:00:00Z,1.5,2.5,1,2\n", encoding="utf-8")
+            (root / "zones.json").write_text(
+                json.dumps([{"start": 1704067200, "end": 1704153600,
+                             "low": 1, "high": 2, "label": "Z"}]), encoding="utf-8")
+            (root / "stats.json").write_text(json.dumps({"Sharpe": 1.5}), encoding="utf-8")
+            out = root / "page.html"
+            rc = chart.main(["from-csv", "--bars", str(root / "bars.csv"),
+                             "--zones", str(root / "zones.json"),
+                             "--stats", str(root / "stats.json"),
+                             "--inds", "SMA2,RSI2,MACD",
+                             "--out", str(out)])
+            self.assertEqual(rc, 0)
+            html = out.read_text(encoding="utf-8")
+            self.assertIn('"Z"', html)
+            self.assertIn('"RSI2"', html)
+            self.assertIn('"MACD"', html)
+            self.assertIn('"Sharpe"', html)
+
+
+class TestViewerAssets(unittest.TestCase):
+    def test_viewer_has_volume_and_oscillator_support(self):
+        html = (chart.ASSETS / chart.VIEWER_NAME).read_text(encoding="utf-8")
+        self.assertIn("addHistogramSeries", html)
+        self.assertIn("function rsi(", html)
+        self.assertIn("function macd(", html)
+        self.assertIn("@media print", html)
 
 
 if __name__ == "__main__":

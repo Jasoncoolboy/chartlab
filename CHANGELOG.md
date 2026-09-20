@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-18
+
+Hardening pass plus optional volume and oscillator indicators.
+
+### Added
+
+- Volume histogram in the viewer, shown only when a timeframe carries a
+  `volume` series; `chart --volume` includes it from the pipeline.
+- RSI and MACD indicator types, computed by the viewer on their own price
+  scale; `parse_indicators` accepts `RSI14` and `MACD`.
+- `from-csv` accepts `--zones`, `--stats` and `--inds` so the standalone CLI
+  can build fully annotated pages.
+- Print stylesheet that hides the toolbar, footer and drawer.
+
+### Changed
+
+- `validate` now rejects null/NaN OHLC, duplicate timestamps, and equity or
+  indicator length mismatches instead of letting the viewer fail.
+- `encode_block` raises clear errors for null/NaN prices and out-of-range
+  timestamps.
+- `parse_indicators` no longer crashes on bare `SMA`/`EMA`, maps `MA50` to
+  `SMA(50)`, and reports unsupported names.
+- `bars_from_csv` names missing columns instead of raising `IndexError`.
+- `gallery` escapes its title/subtitle; the viewer escapes legend text.
+- Viewer color helper passes non-hex colors through instead of producing
+  invalid `rgba(NaN,...)`.
+
 ## [0.1.0] - 2026-09-16
 
 Initial public release: a lean, dependency-light toolkit for turning real
@@ -45,5 +72,6 @@ market bars and backtest output into self-contained, offline HTML charts.
 - Readable JSON remains the default payload format; compact encoding is
   opt-in.
 
-[Unreleased]: https://github.com/Jasoncoolboy/chartlab/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Jasoncoolboy/chartlab/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Jasoncoolboy/chartlab/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Jasoncoolboy/chartlab/releases/tag/v0.1.0

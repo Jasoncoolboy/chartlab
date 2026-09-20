@@ -107,7 +107,8 @@ python3 -c "import chart; print(chart.SPEC_VERSION)"
 3. **Round prices to 4 decimals** (as the built-in exporter does) to keep payloads small.
 4. **Omit volume** unless you actually render it — the viewer has no volume pane.
 5. **Prefer `values` for indicators** you already computed; use `type`+`period` only
-   as a convenience fallback (`sma`, `ema`, `bb`).
+   as a convenience fallback (`sma`, `ema`, `bb`, `rsi`, `macd`). `rsi`/`macd`
+   render on their own price scale.
 6. **`validate` before `render`**, and surface the returned problem list to the user.
 7. **Pick the delivery mode**: default (HTML + `lib/`) or `--inline-lib` for a single
    file you want to email, embed, or ship in a container with no static server.

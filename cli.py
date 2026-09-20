@@ -103,7 +103,8 @@ def cmd_chart(args):
         m1 = m1.loc[m1.index < pd.Timestamp(args.end)]
 
     tfs = list(dict.fromkeys([args.timeframe] + (args.extra_tfs or [])))
-    bars_by_tf = {tf: export.bars_block(data.resample(m1, tf)) for tf in tfs}
+    bars_by_tf = {tf: export.bars_block(data.resample(m1, tf), include_volume=args.volume)
+                  for tf in tfs}
 
     zones = None
     if args.zones_file:
@@ -212,7 +213,9 @@ def main(argv=None):
                    help="metrics_*.json to show as a chart metrics panel")
     p.add_argument("--compact", action="store_true",
                    help="base64-encode bars (~3x smaller page, not human-readable)")
-    p.add_argument("--inds", default=None, help='comma list e.g. "SMA50,EMA200"')
+    p.add_argument("--volume", action="store_true",
+                   help="include the volume series (viewer shows the pane only when present)")
+    p.add_argument("--inds", default=None, help='comma list e.g. "SMA50,EMA200,RSI14,MACD"')
     p.add_argument("--symbol", default="XAUUSD")
     p.add_argument("--exchange", default="")
     p.add_argument("--period-label", default=None)

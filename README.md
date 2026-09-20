@@ -17,9 +17,10 @@ It comes in two layers:
 
 - Candlesticks across multiple timeframes with a timeframe switcher.
 - Trades (entry/exit, SL/TP) and rectangular **zones** drawn on the price axis.
-- Provider indicators (SMA / EMA / Bollinger) as toggle chips — never user-added.
+- Provider indicators (SMA / EMA / Bollinger / RSI / MACD) as toggle chips — never user-added.
 - Optional metrics panel (`stats`) and a **Trades** drawer listing every overlay trade.
 - Optional equity pane synchronised with the main chart.
+- Optional volume histogram, shown only when the spec carries a `volume` series.
 - Three drawing tools: **Hand**, **Rectangle**, **Horizontal line**.
 - Opens fully zoomed out; scroll to zoom, drag to pan, arrow keys to step.
 - Debug handle in the console: `window.ChartLab.debug()`.
@@ -35,9 +36,10 @@ python3 chart.py render examples/sample_spec.json out.html
 # Bundle everything into one shareable file (no lib/ folder needed)
 python3 chart.py render examples/sample_spec.json out.html --inline-lib
 
-# Build a page straight from CSV files
+# Build a page straight from CSV files (optional zones/stats/indicators)
 python3 chart.py from-csv \
   --bars bars.csv --trades trades.csv --equity equity.csv \
+  --zones zones.json --stats stats.json --inds "SMA50,RSI14,MACD" \
   --symbol XAUUSD --timeframe D1 --out page.html
 
 # Check a spec before rendering
@@ -107,7 +109,8 @@ python3 run.py chart --timeframe D1 --extra-tfs H4 W1 \
   --trades-file out/trades_donchian_D1.csv \
   --equity-file out/equity_donchian_D1.csv \
   --stats-file out/metrics_donchian_D1.json \
-  --inds "EMA50,SMA200" --name donchian_D1 --exchange "retail CFD"
+  --inds "EMA50,SMA200,RSI14,MACD" --volume \
+  --name donchian_D1 --exchange "retail CFD"
 
 # Build a catalog of annotated setup pages
 python3 run.py setup --kind donchian --timeframe H4 --n 20 \
@@ -156,8 +159,11 @@ without installing the package.
   nested catalogs share a single `lib/` via `lib_dir="../../lib"`.
 - **Loader pages** (`render_loader` / `chart.py loader`) fetch their spec JSON at runtime,
   so one page can always show the latest data; `?spec=<url>` overrides the URL.
-- **Volume is omitted by default** because the bundled viewer has no volume pane;
-  pass `include_volume=True` to `export.bars_block` if a consumer needs it.
+- **Volume is opt-in**: pass `include_volume=True` to `export.bars_block` (or
+  `chart --volume`); when a series is present the viewer shows the histogram pane
+  and toggle, otherwise the control stays hidden.
+- **Indicators are opt-in**: `SMA`/`EMA`/`BB`/`RSI`/`MACD` chips appear only for
+  indicators the spec defines (`--inds "SMA50,RSI14,MACD"`).
 - **Engine performance**: signals use precomputed ATR and vectorized calendar
   fields, so a full D1 backtest over 1.6M M1 bars runs in ~13s instead of ~49s,
   with byte-identical trade and metric output.

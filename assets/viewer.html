@@ -74,6 +74,7 @@ footer.st b{color:var(--text);font-weight:500}
 #drawerBody .tr .nt{font-variant-numeric:tabular-nums;flex:0 0 auto}
 #drawerBody .tr .nt.up{color:var(--up)}#drawerBody .tr .nt.down{color:var(--down)}
 #drawerBody .more,#drawerBody .empty{padding:10px;color:var(--muted)}
+@media print{body{overflow:visible}header.tb,footer.st,#drawer{display:none!important}#app{height:auto}#chartWrap{height:80vh}}
 </style>
 </head>
 <body>
@@ -84,6 +85,7 @@ footer.st b{color:var(--text);font-weight:500}
     <div class="sep"></div>
     <label class="chk"><input type="checkbox" id="ckZones" checked>Zones</label>
     <label class="chk"><input type="checkbox" id="ckTrades" checked>Trades</label>
+    <label class="chk" id="lblVol" style="display:none"><input type="checkbox" id="ckVol" checked>Volume</label>
     <label class="chk"><input type="checkbox" id="ckEq">Equity</label>
     <label class="chk" id="lblStats" style="display:none"><input type="checkbox" id="ckStats" checked>Metrics</label>
     <button class="tb" id="btnTrades" style="display:none">Trades</button>
@@ -140,7 +142,7 @@ var PAY={},SYM="Chart",TFS={},TRADES=[],ZONES=[],EQ=null,INDS={},STATS=[],defTF=
 var SPEC_URL=__SPEC_URL__;
 var candleCache={},indCalcCache={},drawerRendered=0,hoverTrade=null;
 var PAL=["#2962ff","#e91e63","#7b1fa2","#00897b","#f4511e","#c0ca33","#5e35b1","#00acc1"];
-var chart,series,eqChart,eqSeries,canvas,ctx;
+var chart,series,volumeSeries,eqChart,eqSeries,canvas,ctx;
 var curTF=null,drawings=[],drawMode=null,drawBuf=null,dpr=1,indSeries=[];
 function $(id){return document.getElementById(id)}
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
@@ -176,8 +178,11 @@ function fmtT(t){
   return d.getUTCFullYear()+"-"+p2(d.getUTCMonth()+1)+"-"+p2(d.getUTCDate())+" "+p2(d.getUTCHours())+":"+p2(d.getUTCMinutes());
 }
 function hexA(h,a){
-  h=String(h||"#2962ff").replace("#","");
+  var raw=String(h||"#2962ff").trim();
+  if(raw.charAt(0)!=="#")return raw;
+  h=raw.slice(1);
   if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  if(!/^[0-9a-f]{6}$/i.test(h))return raw;
   var r=parseInt(h.substr(0,2),16),g=parseInt(h.substr(2,2),16),b=parseInt(h.substr(4,2),16);
   return "rgba("+r+","+g+","+b+","+a+")";
 }
@@ -251,17 +256,33 @@ function candleData(tf){
   candleCache[tf]=out;
   return out;
 }
+function volumeData(tf){
+  var d=TFS[tf];if(!d||!d.volume)return null;
+  var out=new Array(d.time.length);
+  for(var i=0;i<d.time.length;i++)out[i]={time:d.time[i],value:d.volume[i],
+    color:(d.close[i]>=d.open[i])?"rgba(38,166,154,0.45)":"rgba(239,83,80,0.45)"};
+  return out;
+}
 function setTF(tf){
   if(!TFS[tf])return;
   curTF=tf;
   var btns=$("tfBtns").children;
   for(var i=0;i<btns.length;i++)btns[i].classList.toggle("on",btns[i].textContent===tf);
   if(series)chart.removeSeries(series);
+  if(volumeSeries){chart.removeSeries(volumeSeries);volumeSeries=null;}
   series=chart.addCandlestickSeries({
     upColor:"#26a69a",downColor:"#ef5350",borderUpColor:"#26a69a",borderDownColor:"#ef5350",wickUpColor:"#26a69a",wickDownColor:"#ef5350",
     priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:true,crosshairMarkerRadius:3
   });
   series.setData(candleData(tf));
+  var vd=volumeData(tf);
+  $("lblVol").style.display=vd?"":"none";
+  if(vd){
+    volumeSeries=chart.addHistogramSeries({priceFormat:{type:"volume"},priceScaleId:"vol",priceLineVisible:false,lastValueVisible:false});
+    volumeSeries.setData(vd);
+    volumeSeries.priceScale().applyOptions({scaleMargins:{top:0.82,bottom:0}});
+    volumeSeries.applyOptions({visible:$("ckVol").checked});
+  }
   rebuildInds();
   defaultLegend();
   onRange();
@@ -270,8 +291,32 @@ function setTF(tf){
 function sma(a,n){var s=0,o=new Array(a.length);for(var i=0;i<a.length;i++){s+=a[i];if(i>=n)s-=a[i-n];o[i]=(i>=n-1)?s/n:null;}return o}
 function ema(a,n){var k=2/(n+1),p=null,o=new Array(a.length);for(var i=0;i<a.length;i++){p=(p===null)?a[i]:a[i]*k+p*(1-k);o[i]=p;}return o}
 function boll(a,n){var m=sma(a,n),o=new Array(a.length);for(var i=0;i<a.length;i++){if(m[i]===null){o[i]=null;continue}var s=0;for(var j=i-n+1;j<=i;j++)s+=(a[j]-m[i])*(a[j]-m[i]);o[i]=Math.sqrt(s/n);}return {m:m,u:m.map(function(x,i){return x===null?null:x+2*o[i]}),lo:m.map(function(x,i){return x===null?null:x-2*o[i]})}}
-function mkLine(color,w){
-  return chart.addLineSeries({color:color,lineWidth:w||1,priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:false});
+function rsi(a,n){
+  n=n||14;var out=new Array(a.length),g=0,l=0;
+  for(var i=0;i<a.length;i++){
+    out[i]=null;
+    if(i===0)continue;
+    var d=a[i]-a[i-1],up=d>0?d:0,dn=d<0?-d:0;
+    if(i<=n){
+      g+=up;l+=dn;
+      if(i===n){g=g/n;l=l/n;out[i]=l===0?100:100-100/(1+g/l);}
+    }else{
+      g=(g*(n-1)+up)/n;l=(l*(n-1)+dn)/n;
+      out[i]=l===0?100:100-100/(1+g/l);
+    }
+  }
+  return out;
+}
+function macd(a,fast,slow,signal){
+  fast=fast||12;slow=slow||26;signal=signal||9;
+  var ef=ema(a,fast),es=ema(a,slow);
+  var line=ef.map(function(v,i){return v-es[i]});
+  return {macd:line,signal:ema(line,signal)};
+}
+function mkLine(color,w,scaleId){
+  var o={color:color,lineWidth:w||1,priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:false};
+  if(scaleId)o.priceScaleId=scaleId;
+  return chart.addLineSeries(o);
 }
 function toPts(times,vals){
   var o=[];
@@ -287,6 +332,8 @@ function indCalc(tf,i,def,c){
   var type=String(def.type||"").toLowerCase();
   if(type==="bb")v={bb:boll(c,def.period||20)};
   else if(type==="ema")v={line:ema(c,def.period||20)};
+  else if(type==="rsi")v={line:rsi(c,def.period||14)};
+  else if(type==="macd")v={macd:macd(c)};
   else v={line:sma(c,def.period||20)};
   indCalcCache[key]=v;
   return v;
@@ -307,6 +354,15 @@ function rebuildInds(){
       if(calc.bb){
         var su=mkLine(col+"77",1),sl=mkLine(col+"77",1);
         su.setData(toPts(T,calc.bb.u));sl.setData(toPts(T,calc.bb.lo));list=[su,sl];
+      }else if(calc.macd){
+        var sm=mkLine(col,1,"ind"+i),sg=mkLine(col+"88",1,"ind"+i);
+        sm.setData(toPts(T,calc.macd.macd));sg.setData(toPts(T,calc.macd.signal));
+        sm.priceScale().applyOptions({scaleMargins:{top:0.7,bottom:0.02}});
+        list=[sm,sg];
+      }else if(type==="rsi"){
+        var sr=mkLine(col,1,"ind"+i);sr.setData(toPts(T,calc.line));
+        sr.priceScale().applyOptions({scaleMargins:{top:0.78,bottom:0.02}});
+        list=[sr];
       }else{
         var s2=mkLine(col,type==="ema"?2:1);s2.setData(toPts(T,calc.line));list=[s2];
       }
@@ -381,7 +437,7 @@ function onCrosshair(param){
   if(bar){
     var ch=bar.close-bar.open,pc=bar.open?ch/bar.open*100:0;
     txt.push("O "+bar.open.toFixed(3),"H "+bar.high.toFixed(3),"L "+bar.low.toFixed(3),"C "+bar.close.toFixed(3)+(ch>=0?" +":" ")+pc.toFixed(2)+"%");
-    var v="<div class='l1'>"+SYM+" <span class='s2'>"+(PAY.exchange||"")+"</span><span class='tf'>"+curTF+"</span></div>";
+    var v="<div class='l1'>"+esc(SYM)+" <span class='s2'>"+esc(PAY.exchange||"")+"</span><span class='tf'>"+esc(curTF)+"</span></div>";
     v+="<div class='vals'><span class='c "+(ch>=0?"up":"dn")+"' style='font-weight:600;font-size:13px'>"+bar.close.toFixed(3)+"</span><span class='o'>O "+bar.open.toFixed(3)+"</span><span class='h'>H "+bar.high.toFixed(3)+"</span><span class='l'>L "+bar.low.toFixed(3)+"</span><span class='ch'>"+(ch>=0?"+":"")+pc.toFixed(2)+"%</span></div>";
     $("legend").innerHTML=v;
   }
@@ -400,7 +456,7 @@ function defaultLegend(){
   var d=TFS[curTF];if(!d.time.length)return;
   var i=d.time.length-1;
   var ch=d.close[i]-d.open[i],pc=d.open[i]?ch/d.open[i]*100:0;
-  var v="<div class='l1'>"+SYM+" <span class='s2'>"+(PAY.exchange||"")+"</span><span class='tf'>"+curTF+"</span></div>";
+  var v="<div class='l1'>"+esc(SYM)+" <span class='s2'>"+esc(PAY.exchange||"")+"</span><span class='tf'>"+esc(curTF)+"</span></div>";
   v+="<div class='vals'><span class='c "+(ch>=0?"up":"dn")+"' style='font-weight:600;font-size:13px'>"+d.close[i].toFixed(3)+"</span><span class='o'>O "+d.open[i].toFixed(3)+"</span><span class='h'>H "+d.high[i].toFixed(3)+"</span><span class='l'>L "+d.low[i].toFixed(3)+"</span><span class='ch'>"+(ch>=0?"+":"")+pc.toFixed(2)+"%</span></div>";
   $("legend").innerHTML=v;
 }
@@ -565,6 +621,7 @@ function evPoint(e){
 }
 function bindUI(){
   $("ckZones").onchange=redraw;$("ckTrades").onchange=redraw;
+  $("ckVol").onchange=function(){if(volumeSeries)volumeSeries.applyOptions({visible:$("ckVol").checked})};
   $("ckStats").onchange=renderStats;
   $("btnTrades").onclick=function(){toggleDrawer()};
   $("drawerClose").onclick=function(){toggleDrawer(false)};
@@ -727,6 +784,7 @@ function debug(){
     drawingList:drawings.map(function(d){return d;}),
     inds:defs.length,
     indsOn:defs.filter(function(d){return d.on!==false}).length,
+    volume:!!volumeSeries,volumeOn:volumeSeries?$("ckVol").checked:false,
     eqOn:!$("eqWrap").classList.contains("hide"),
     stats:STATS.length,statsOn:!$("stats").classList.contains("hide"),
     drawerOpen:!$("drawer").classList.contains("hide"),drawerRows:drawerRendered,

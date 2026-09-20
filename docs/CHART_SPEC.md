@@ -41,7 +41,7 @@ One entry in `timeframes`. All arrays must be the same length and ordered oldest
 | `high`   | float[]         | yes      | |
 | `low`    | float[]         | yes      | |
 | `close`  | float[]         | yes      | |
-| `volume` | float[] or null | no       | Optional. The bundled viewer has no volume pane, so omit it to save space. |
+| `volume` | float[] or null | no       | Optional. When present the viewer shows a volume histogram pane and a Volume toggle; when absent the control is hidden, so omit it to save space. |
 
 Compact keys are also accepted and expanded: `t`→`time`, `o`→`open`, `h`→`high`,
 `l`→`low`, `c`→`close`, `v`→`volume`.
@@ -134,11 +134,13 @@ Indicators are **provider-supplied** and only toggled by the user, never added.
 | `width`  | int             | no       | Line width, default `1`. |
 | `on`     | bool            | no       | Initial visibility, default `true`. |
 | `values` | (float\|null)[] | no       | Explicit series aligned to the timeframe's `time`. **Preferred.** |
-| `type`   | string          | no       | Fallback if `values` is absent: `"sma"` (default), `"ema"`, or `"bb"`. |
-| `period` | int             | no       | Period used by the fallback `type`, default `20`. |
+| `type`   | string          | no       | Fallback if `values` is absent: `"sma"` (default), `"ema"`, `"bb"`, `"rsi"`, or `"macd"`. |
+| `period` | int             | no       | Period used by the fallback `type`, default `20` (`14` for `rsi`; ignored by `macd`, which uses 12/26/9). |
 
 When `values` is supplied the viewer plots it as-is; when absent it computes the
-indicator from the timeframe's `close` using `type`/`period`.
+indicator from the timeframe's `close` using `type`/`period`. `rsi` and `macd`
+are drawn on their own price scale so they do not squash the candles. Chips
+appear only for indicators present in the spec.
 
 ```json
 "indicators": {
@@ -196,7 +198,7 @@ render(s, "out.html", title="XAUUSD D1", inline_lib=False)
 | `encode_block(block)` / `encode_timeframes(blocks)` | bar block(s) → compact base64 |
 | `bars_from_csv(path, ...)` | CSV → bar block (auto-detects columns) |
 | `trades_from_csv(path)` / `equity_from_csv(path)` | CSV → trades / equity |
-| `parse_indicators("SMA50,EMA200,BB20")` | shorthand → indicator definitions |
+| `parse_indicators("SMA50,EMA200,BB20,RSI14,MACD")` | shorthand → indicator definitions |
 | `spec(...)` | assemble a validated spec |
 | `validate(spec)` | list of problems (empty = valid) |
 | `render(spec, out, ...)` | write the HTML page |
