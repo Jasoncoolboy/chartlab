@@ -1,5 +1,7 @@
 # ChartLab — todo
 
+**Status 2026-09-26:** items 1–6 done; open work and caveats are in `NEXT-SESSION.md`.
+
 Issues found generating 80 setup pages for `C:\personalCode\scalperEngulfingSystem` (System 3) on 2026-09-23 via
 `setups.setups_from_rows` / `render_pages`. Checked with headless-Edge screenshots before and after each workaround.
 The workarounds live in `scalperEngulfingSystem/tools/chart/system3_setup_pages.py`.
