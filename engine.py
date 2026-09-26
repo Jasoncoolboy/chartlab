@@ -155,7 +155,8 @@ def run_backtest(
             px = bo[i] - add - slippage
             sl = px + sl_dist if sl_dist > 0 else None
             tp = px - tp_dist if tp_dist > 0 else None
-        commission = comm_lot * lots * 2.0
+        comm_pct = getattr(cost, "commission_pct_side", 0.0) / 100.0 * px * cost.contract_size_oz
+        commission = (comm_lot + comm_pct) * lots * 2.0          # both sides, charged at entry
         cash -= commission
         pos = _Position(direction, lots, ts[i], px, i, day_a[i], sl, tp, commission)
 

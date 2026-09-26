@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Legacy backtest cost defaults (`CostConfig`) are now FTMO's measured XAUUSD costs: commission 0.0007 % of notional
+  per side (new field `commission_pct_side`, added to the flat `commission_per_side_per_lot`), slippage $0.05 per fill,
+  swap -83 / -8.3 USD per lot per night. Source: FTMO account probe 2026-09-18 and MT5 tester cost probe 2026-09-23
+  (`testEGEA/results/mt5/egbook_costprobe.csv`). The engine is still a demo — see todo.md item 6.
+
 ## [0.3.0] - 2026-09-20
 
 Usable from other systems on FTMO or Dukascopy data: UTC inside, Malaysian time on screen,

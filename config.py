@@ -27,12 +27,16 @@ class CostConfig:
     lot_step: float = 0.01
     min_lot: float = 0.01
 
-    commission_per_side_per_lot: float = 0.0
-    slippage_per_side_usd: float = 0.02
+    # Defaults = FTMO's MEASURED XAUUSD costs (account probe 2026-09-18, MT5 tester probe 2026-09-23, see the global
+    # CLAUDE.md FTMO section): commission 0.0007 % of notional PER SIDE (~$3.02/lot/side at 4,314), slippage allowance
+    # $0.05 per market fill, swap -83 / -8.3 USD per lot per night (points x $1), Wednesday night x3.
+    commission_per_side_per_lot: float = 0.0     # flat $/lot/side (FX: 2.50); added to the percent below
+    commission_pct_side: float = 0.0007          # percent of notional per side (metals 0.0007, BTC 0.0325, FX 0)
+    slippage_per_side_usd: float = 0.05
     spread_add_per_side_usd: float = 0.0
 
-    swap_long_per_lot_per_day: float = -14.0
-    swap_short_per_lot_per_day: float = -4.0
+    swap_long_per_lot_per_day: float = -83.0
+    swap_short_per_lot_per_day: float = -8.3
     triple_swap_on_wednesday: bool = True
 
     def to_json(self, path: str | Path) -> None:

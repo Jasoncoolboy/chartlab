@@ -42,8 +42,9 @@ def cmd_resample(args):
 
 
 def cmd_backtest(args):
-    print("warning: legacy backtest - Dukascopy XAUUSD only, and its cost defaults (no commission, "
-          "$0.02 slippage, swap -14/-4) are NOT the measured FTMO costs; do not quote its numbers.",
+    print("warning: legacy backtest - Dukascopy XAUUSD only. Cost defaults are FTMO's measured XAUUSD costs "
+          "(0.0007 %/side commission, $0.05 slippage, swap -83/-8.3) but swap rolls at 00:00 of the data clock "
+          "with Wednesday x3, not FTMO's 00:00-server Wed->Thu x3; do not quote its numbers.",
           file=sys.stderr)
     cost = CostConfig.from_json(args.cost_file) if args.cost_file else CostConfig()
     bt = BacktestConfig(default_lots=args.lots, signal_timeframe=args.timeframe)
