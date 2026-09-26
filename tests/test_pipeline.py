@@ -225,6 +225,128 @@ class TestPriceDataAdapter(unittest.TestCase):
         self.assertEqual(vals, self.m15["Close"].tolist())
 
 
+def make_m1_server(start="2026-03-04", days=9, seed=5):
+    """FX-like M1 in FTMO SERVER time: Mon-Fri 00:05-23:55, across the US DST switch
+    (2026-03-08) so the UTC conversion changes offset inside the data."""
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range(start, periods=days * 1440, freq="1min", name="Datetime")
+    idx = idx[(idx.weekday < 5) & (idx.hour * 60 + idx.minute >= 5) & (idx.hour * 60 + idx.minute <= 23 * 60 + 55)]
+    n = len(idx)
+    close = np.round(1.1 + np.cumsum(rng.normal(0, 0.0001, n)), 5)
+    open_ = np.r_[close[0], close[:-1]]
+    high = np.round(np.maximum(open_, close) + np.abs(rng.normal(0, 0.00005, n)), 5)
+    low = np.round(np.minimum(open_, close) - np.abs(rng.normal(0, 0.00005, n)), 5)
+    return pd.DataFrame({"Open": open_, "High": high, "Low": low, "Close": close,
+                         "Volume": rng.integers(1, 50, n), "SpreadPts": 2}, index=idx)
+
+
+@unittest.skipIf(pd is None or not HAVE_PARQUET, "pandas/pyarrow not installed")
+class TestBuiltFromM1(unittest.TestCase):
+    """todo item 3: native higher-timeframe holes must not pass silently into pages."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.dir = self.root / "data" / "clean" / "EURUSD"
+        self.dir.mkdir(parents=True)
+        self.m1 = make_m1_server()
+        self.m1.to_parquet(self.dir / "EURUSD_M1.parquet")
+        self.native = {}
+        for tf in ("M15", "H1", "H4", "D1"):          # the "broker's" files: exact M1 aggregates
+            nat = pricedata.aggregate_m1(self.m1, tf)
+            nat["SpreadPts"] = 2
+            nat.attrs = {}
+            nat.to_parquet(self.dir / f"EURUSD_{tf}.parquet")
+            self.native[tf] = nat
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _write(self, tf, frame):
+        frame.to_parquet(self.dir / f"EURUSD_{tf}.parquet")
+
+    def test_bins_sit_on_the_server_grid(self):
+        h4 = pricedata.aggregate_m1(self.m1, "H4")
+        self.assertTrue((h4.index.hour % 4 == 0).all() and (h4.index.minute == 0).all())
+        d1 = pricedata.aggregate_m1(self.m1, "D1")
+        self.assertTrue((d1.index.hour == 0).all())
+        self.assertEqual(set(pricedata.aggregate_m1(self.m1, "W1").index.weekday), {6})     # Sunday
+        self.assertTrue((pricedata.aggregate_m1(self.m1, "MN").index.day == 1).all())
+        first = self.m1.loc[self.m1.index < h4.index[0] + pd.Timedelta(hours=4)]
+        self.assertEqual((h4["Open"].iloc[0], h4["High"].iloc[0], h4["Low"].iloc[0], h4["Close"].iloc[0]),
+                         (first["Open"].iloc[0], first["High"].max(), first["Low"].min(), first["Close"].iloc[-1]))
+        with self.assertRaises(ValueError):
+            pricedata.aggregate_m1(self.m1, "M7")
+
+    def test_m1_build_equals_the_native_file_in_utc(self):
+        for tf in ("M15", "H1", "H4", "D1"):
+            nat = pricedata.load_frame("EURUSD", tf, root=self.root)
+            built = pricedata.load_frame("EURUSD", tf, root=self.root, bars="m1")
+            self.assertTrue(nat.index.equals(built.index), tf)
+            for c in ("Open", "High", "Low", "Close"):
+                self.assertEqual(nat[c].tolist(), built[c].tolist(), f"{tf} {c}")
+        # a window and max_bars behave as for native frames (UTC bounds)
+        w = pricedata.load_frame("EURUSD", "H1", root=self.root, bars="m1",
+                                 start="2026-03-09 03:00", end="2026-03-10 00:00")
+        n = pricedata.load_frame("EURUSD", "H1", root=self.root, start="2026-03-09 03:00", end="2026-03-10 00:00")
+        self.assertTrue(w.index.equals(n.index))
+        self.assertEqual(w["High"].tolist(), n["High"].tolist())
+        self.assertEqual(len(pricedata.load_frame("EURUSD", "H4", root=self.root, bars="m1", max_bars=7)), 7)
+        with self.assertRaises(ValueError):
+            pricedata.load_frame("EURUSD", "H1", root=self.root, bars="tick")
+
+    def test_clean_native_frames_check_clean(self):
+        frames = {tf: pricedata.load_frame("EURUSD", tf, root=self.root) for tf in self.native}
+        res = pricedata.check_vs_m1("EURUSD", frames, root=self.root)
+        self.assertEqual({tf: r["status"] for tf, r in res.items()}, dict.fromkeys(frames, "clean"))
+        self.assertTrue(all(r["compared"] > 0 for r in res.values()))
+        self.assertEqual(pricedata.describe_check("EURUSD", res), [])
+
+    def test_holes_wrong_bars_and_orphans_are_counted_exactly(self):
+        bad = self.native["H1"].copy()
+        gone = bad.index[[30, 31, 32]]
+        bad = bad.drop(gone)
+        changed = bad.index[50]
+        bad.loc[changed, "High"] += 0.0005
+        orphan = pd.Timestamp("2026-03-07 12:00")                       # a Saturday: no M1 behind it
+        bad.loc[orphan] = [1.1, 1.1, 1.1, 1.1, 1, 2]
+        self._write("H1", bad.sort_index())
+        frame = pricedata.load_frame("EURUSD", "H1", root=self.root)
+        r = pricedata.check_vs_m1("EURUSD", {"H1": frame}, root=self.root)["H1"]
+        conv = lambda t: sources.ftmo_server_to_utc(pd.DatetimeIndex(t))
+        self.assertEqual(r["status"], "dirty")
+        self.assertTrue(r["missing"].equals(conv(gone)))
+        self.assertEqual(list(r["mismatched"]), list(conv([changed])))
+        self.assertEqual(list(r["extra"]), list(conv([orphan])))
+        (line,) = pricedata.describe_check("EURUSD", {"H1": r})
+        self.assertIn("3 missing", line)
+        self.assertIn("1 mismatched", line)
+        # a window that starts inside the file's history still sees a hole at its very start
+        w = pricedata.check_vs_m1("EURUSD", {"H1": frame}, start=r["missing"][0], root=self.root)["H1"]
+        self.assertEqual(len(w["missing"]), 3)
+
+    def test_build_spec_warns_and_m1_bars_fix_it(self):
+        bad = self.native["H4"].drop(self.native["H4"].index[[5, 6]])
+        self._write("H4", bad)
+        with self.assertWarnsRegex(pricedata.DataWarning, r"EURUSD H4: .*2 missing.*bars='m1'"):
+            s = pricedata.build_spec("EURUSD", ["H1", "H4"], root=self.root)
+        self.assertEqual(len(s["timeframes"]["H4"]["time"]), len(self.native["H4"]) - 2)
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("error", pricedata.DataWarning)
+            s = pricedata.build_spec("EURUSD", ["H1", "H4"], root=self.root, bars="m1")
+            self.assertEqual(len(s["timeframes"]["H4"]["time"]), len(self.native["H4"]))
+            pricedata.build_spec("EURUSD", ["H1", "H4"], root=self.root, verify_m1=False)
+
+    def test_no_m1_file_is_unverified_never_clean(self):
+        (self.dir / "EURUSD_M1.parquet").unlink()
+        frames = {"H1": pricedata.load_frame("EURUSD", "H1", root=self.root)}
+        r = pricedata.check_vs_m1("EURUSD", frames, root=self.root)["H1"]
+        self.assertEqual(r["status"], "unverified")
+        with self.assertWarnsRegex(pricedata.DataWarning, "NOT verified"):
+            pricedata.build_spec("EURUSD", ["H1"], root=self.root)
+
+
 @unittest.skipIf(pd is None or not (REAL_PRICEDATA / "data" / "clean").is_dir(),
                  "real priceData folder not present")
 class TestRealPriceData(unittest.TestCase):
@@ -244,6 +366,25 @@ class TestRealPriceData(unittest.TestCase):
         for sym, want in (("EURUSD", 5), ("USDJPY", 3), ("XAUUSD", 2)):
             s = pricedata.build_spec(sym, ["H1"], max_bars=2000, root=REAL_PRICEDATA)
             self.assertEqual(s["precision"], want, sym)
+
+    def test_native_files_match_m1_on_a_clean_year(self):
+        """2025 is clean in priceData (its own verify_htf_vs_m1 agrees): every timeframe must match."""
+        for sym in ("EURUSD", "USDJPY", "XAUUSD", "BTCUSD"):
+            frames = {tf: pricedata.load_frame(sym, tf, root=REAL_PRICEDATA)
+                      for tf in ("M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN")}
+            res = pricedata.check_vs_m1(sym, frames, start="2025-01-01", end="2026-01-01", root=REAL_PRICEDATA)
+            for tf, r in res.items():
+                self.assertEqual((r["status"], len(r["missing"]), len(r["mismatched"]), len(r["extra"])),
+                                 ("clean", 0, 0, 0), f"{sym} {tf}")
+                self.assertGreater(r["compared"], 10, f"{sym} {tf}")
+
+    def test_real_holes_are_found_when_made(self):
+        h1 = pricedata.load_frame("EURUSD", "H1", root=REAL_PRICEDATA, start="2025-03-01", end="2025-04-01")
+        holed = h1.drop(h1.index[[40, 41, 42, 43, 44]])
+        r = pricedata.check_vs_m1("EURUSD", {"H1": holed}, start="2025-03-01", end="2025-04-01",
+                                  root=REAL_PRICEDATA)["H1"]
+        self.assertEqual(list(r["missing"]), list(h1.index[[40, 41, 42, 43, 44]]))
+        self.assertEqual((len(r["mismatched"]), len(r["extra"])), (0, 0))
 
     def test_every_symbol_timeframe_loads_and_passes_the_integrity_check(self):
         for sym in pricedata.SYMBOLS:
@@ -367,6 +508,17 @@ class TestSetups(unittest.TestCase):
             self.assertLess(t[-1], end, tf)                 # nothing opens past the window's end
             self.assertGreaterEqual(len(t), min(setups.MIN_EXTRA_BARS, len(t)), tf)
         self.assertGreaterEqual(len(page["timeframes"]["D1"]["time"]), 1)
+
+    def test_page_windows_are_the_bars_the_page_shows(self):
+        ss = _setups([self._row(), self._row(id="late", entry_time=str(self.df.index[500]),
+                                             arm=str(self.df.index[499]))], "M15")
+        extras = {"H1": self.h1, "D1": self.d1}
+        for s, w in zip(ss, setups.page_windows(self.df, ss, 30, 20, extras)):
+            page = setups.slice_spec(self.df, s, 30, 20, extra_frames=extras)
+            self.assertEqual(set(w), set(page["timeframes"]))
+            for tf, (a, b) in w.items():
+                t = page["timeframes"][tf]["time"]
+                self.assertEqual(export._epochs(pd.DatetimeIndex([a, b])), [t[0], t[-1]], tf)
 
     def test_oversized_extra_view_is_skipped(self):
         (s,) = _setups([self._row()], "M15")

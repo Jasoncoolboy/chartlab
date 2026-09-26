@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -146,11 +147,18 @@ def cmd_chart(args):
     if src == "ftmo":
         tf = (args.timeframe or "D1").upper()
         tfs = list(dict.fromkeys([tf] + [t.upper() for t in (args.extra_tfs or [])]))
-        page = pricedata.build_spec(
-            args.symbol, tfs, default_tf=tf, start=args.start, end=args.end,
-            max_bars=args.max_bars, volume=args.volume, trades=trades, zones=zones,
-            equity=equity, clock=args.clock, indicators=args.inds, stats=stats,
-            tz=args.tz, root=args.root)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", pricedata.DataWarning)
+            page = pricedata.build_spec(
+                args.symbol, tfs, default_tf=tf, start=args.start, end=args.end,
+                max_bars=args.max_bars, volume=args.volume, trades=trades, zones=zones,
+                equity=equity, clock=args.clock, indicators=args.inds, stats=stats,
+                tz=args.tz, root=args.root, bars=args.bars, verify_m1=not args.no_m1_check)
+        for w in caught:
+            if issubclass(w.category, pricedata.DataWarning):
+                print("WARNING:", w.message)
+            else:
+                warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
     elif src == "dukascopy":
         tf = (args.timeframe or "D1").upper()
         tfs = list(dict.fromkeys([tf] + [t.upper() for t in (args.extra_tfs or [])]))
@@ -211,8 +219,10 @@ def _load_setup_frames(args):
     if src == "ftmo":
         # Full history up to --end: the finders need their warm-up bars; --start
         # only filters which setups are kept. Everything is UTC.
-        df = pricedata.load_frame(args.symbol, args.timeframe, end=args.end or None, root=args.root)
-        extra = {t: pricedata.load_frame(args.symbol, t, end=args.end or None, root=args.root)
+        df = pricedata.load_frame(args.symbol, args.timeframe, end=args.end or None, root=args.root,
+                                  bars=args.bars)
+        extra = {t: pricedata.load_frame(args.symbol, t, end=args.end or None, root=args.root,
+                                         bars=args.bars)
                  for t in others}
         return df, extra, "ftmo"
     df = data.load_bars(args.data, tf=args.timeframe, start=args.start or None, end=args.end or None)
@@ -220,6 +230,35 @@ def _load_setup_frames(args):
     extra = {t: data.load_bars(args.data, tf=t, start=args.start or None, end=args.end or None)
              for t in others}
     return df, extra, "dukascopy"
+
+
+def _check_pages(args, df, extra_frames, found, src) -> list:
+    """Native FTMO bars: compare every timeframe of the pages with M1 over the bars the
+    pages show, and print what disagrees and how many pages show it. Returns the lines."""
+    if src != "ftmo" or args.bars != "native" or args.no_m1_check or not found:
+        return []
+    wins = setups.page_windows(df, found, args.pre, args.post, extra_frames)
+    frames = {args.timeframe: df, **extra_frames}
+    lines, bad = [], {}
+    for tf, frame in frames.items():
+        spans = [w[tf] for w in wins if tf in w]
+        if tf == "M1" or not spans:
+            continue
+        step = pd.Timedelta(seconds=sources.spacing_seconds(frame.index) or 60)
+        res = pricedata.check_vs_m1(args.symbol, {tf: frame}, start=min(a for a, _ in spans),
+                                    end=max(b for _, b in spans) + step, root=args.root)
+        lines += pricedata.describe_check(args.symbol, res)
+        r = res[tf]
+        if r["status"] == "dirty":
+            bad[tf] = r["missing"].union(r["mismatched"]).union(r["extra"])
+    for line in lines:
+        print("WARNING:", line)
+    if bad:
+        hit = sum(1 for w in wins if any(((t >= w[tf][0]) & (t <= w[tf][1])).any()
+                                         for tf, t in bad.items() if tf in w))
+        print(f"WARNING: {hit} of {len(found)} pages show those bars; --bars m1 builds every "
+              "timeframe from M1 instead")
+    return lines
 
 
 def cmd_setup(args):
@@ -248,6 +287,7 @@ def cmd_setup(args):
         extra.append(f"{args.start or '...'}→{args.end or '...'} UTC")
     label = pstr + ((" · " + " · ".join(extra)) if extra else "")
 
+    _check_pages(args, df, extra_frames, found, src)
     out_dir, lib_dir = _setup_out(args.out or "setups")
     pages = setups.render_pages(df, found, out_dir, pre=args.pre, post=args.post,
                                 lib_dir=lib_dir, symbol=args.symbol.upper(),
@@ -276,6 +316,7 @@ def cmd_rows(args):
     args.start = None
     df, extra_frames, src = _load_setup_frames(args)
     found = setups.setups_from_rows(rows, args.timeframe, clock=args.clock, symbol=args.symbol.upper())
+    _check_pages(args, df, extra_frames, found, src)
     out_dir, lib_dir = _setup_out(args.out)
     pages = setups.render_pages(df, found, out_dir, pre=args.pre, post=args.post,
                                 lib_dir=lib_dir, symbol=args.symbol.upper(),
@@ -326,6 +367,10 @@ def main(argv=None):
     tz_help = "display zone the page opens in (default MYT = Malaysian time, UTC+8); switchable in the page"
     clock_help = ("clock of the times in trades/zones/equity/rows: ftmo = FTMO server time (UTC+2, "
                   "+3 in US DST), utc, or myt. Required whenever any are given.")
+    bars_help = ("--source ftmo: native = each timeframe's own priceData file (default); m1 = build every "
+                 "timeframe from the M1 file (use it when the native files have holes)")
+    check_help = ("--source ftmo, native bars: skip comparing the page's bars with the same bars built "
+                  "from M1 (on by default: a hole or a wrong native bar is reported)")
     p = sub.add_parser("chart", help="render an HTML page from priceData (or legacy parquet) + overlays")
     p.add_argument("--source", choices=src_choices, default="ftmo", help=src_help)
     p.add_argument("--assume", choices=["ftmo", "dukascopy"], default=None,
@@ -353,6 +398,8 @@ def main(argv=None):
     p.add_argument("--exchange", default="")
     p.add_argument("--period-label", default=None)
     p.add_argument("--name", default=None)
+    p.add_argument("--bars", choices=list(pricedata.BARS), default="native", help=bars_help)
+    p.add_argument("--no-m1-check", action="store_true", help=check_help)
     p.set_defaults(func=cmd_chart)
 
     p = sub.add_parser("setup", help="generate a setup catalog + annotated pages (built-in Donchian / MA-cross finders)")
@@ -378,6 +425,8 @@ def main(argv=None):
     p.add_argument("--pre", type=int, default=60)
     p.add_argument("--post", type=int, default=45)
     p.add_argument("--out", default=None)
+    p.add_argument("--bars", choices=list(pricedata.BARS), default="native", help=bars_help)
+    p.add_argument("--no-m1-check", action="store_true", help=check_help)
     p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("rows", help="setup pages from another system's rows (JSON file)")
@@ -398,6 +447,8 @@ def main(argv=None):
     p.add_argument("--data", default=str(DATA / "parquet" / "XAUUSD_M1.parquet"),
                    help="Dukascopy M1 parquet, or the file for --source auto")
     p.add_argument("--out", required=True, help="folder name under out/charts, or an absolute folder")
+    p.add_argument("--bars", choices=list(pricedata.BARS), default="native", help=bars_help)
+    p.add_argument("--no-m1-check", action="store_true", help=check_help)
     p.set_defaults(func=cmd_rows)
 
     args = parser.parse_args(argv)

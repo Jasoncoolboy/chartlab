@@ -245,6 +245,41 @@ def _slice_extra(edf: pd.DataFrame, lo: int, hi_end: int) -> pd.DataFrame | None
     return edf.iloc[i0:i1]
 
 
+def _page_slices(df: pd.DataFrame, setup: Setup, pre_bars: int, post_bars: int,
+                 extra_frames: dict | None) -> tuple:
+    """(bars of the setup's own timeframe, {tf: bars of each extra view}) its page shows."""
+    df = export.to_bid_frame(df)
+    times = pd.DatetimeIndex(df.index)
+    _check_in_range(times, setup)
+    pos = _bar_index(times, setup.trigger_time)
+    sub = df.iloc[max(0, pos - pre_bars):min(len(times), pos + post_bars + 1)]
+    extras = {}
+    if extra_frames:
+        sub_t = _epoch_array(sub.index)
+        step = int(np.median(np.diff(sub_t))) if len(sub_t) > 1 else 86400
+        for etf, edf in extra_frames.items():
+            if etf == setup.tf:
+                continue
+            esub = _slice_extra(export.to_bid_frame(edf), int(sub_t[0]), int(sub_t[-1]) + step)
+            if esub is not None:
+                extras[etf] = esub
+    return sub, extras
+
+
+def page_windows(df: pd.DataFrame, setups: list[Setup], pre: int = 60, post: int = 45,
+                 extra_frames: dict | None = None) -> list[dict]:
+    """For each setup, ``{tf: (first, last)}`` - the first and last bar its page
+    shows in each timeframe, cut exactly as ``slice_spec`` cuts them."""
+    extras = {k.upper(): export.to_bid_frame(v) for k, v in (extra_frames or {}).items()}
+    out = []
+    for s in setups:
+        sub, extra_subs = _page_slices(df, s, pre, post, extras)
+        w = {s.tf: (sub.index[0], sub.index[-1])}
+        w.update({etf: (e.index[0], e.index[-1]) for etf, e in extra_subs.items()})
+        out.append(w)
+    return out
+
+
 def slice_spec(df: pd.DataFrame, setup: Setup, pre_bars: int = 60,
                post_bars: int = 45, *, symbol: str | None = None,
                extra_frames: dict | None = None, exchange: str = "setup",
@@ -257,22 +292,11 @@ def slice_spec(df: pd.DataFrame, setup: Setup, pre_bars: int = 60,
     comes from the setup, else ``symbol``. ``tz`` is the viewer's initial
     display zone (UTC or MYT, default MYT).
     """
-    df = export.to_bid_frame(df)
-    times = pd.DatetimeIndex(df.index)
-    _check_in_range(times, setup)
-    pos = _bar_index(times, setup.trigger_time)
-    sub = df.iloc[max(0, pos - pre_bars):min(len(times), pos + post_bars + 1)]
+    sub, extra_subs = _page_slices(df, setup, pre_bars, post_bars, extra_frames)
     tf = setup.tf
     blocks = {tf: export.bars_block(sub)}
-    if extra_frames:
-        sub_t = _epoch_array(sub.index)
-        step = int(np.median(np.diff(sub_t))) if len(sub_t) > 1 else 86400
-        for etf, edf in extra_frames.items():
-            if etf == tf:
-                continue
-            esub = _slice_extra(export.to_bid_frame(edf), int(sub_t[0]), int(sub_t[-1]) + step)
-            if esub is not None:
-                blocks[etf] = export.bars_block(esub)
+    for etf, esub in extra_subs.items():
+        blocks[etf] = export.bars_block(esub)
     trade = {"dir": setup.dir, "entryTime": setup.entry_time,
              "entryPrice": setup.entry_price, "sl": setup.stop, "tp": setup.target}
     if setup.lots:
