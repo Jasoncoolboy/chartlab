@@ -15,8 +15,8 @@ It comes in three layers:
    charts and per-setup pages, and turn **another system's setup rows** into pages.
    Requires `pandas`, `numpy`, `pyarrow`.
 3. **A legacy research pipeline** (`data.py`, `dukascopy.py`, `engine.py`, `strategies.py`,
-   `metrics.py`) — a Dukascopy XAUUSD backtester. ⛔ Its costs are **not** the measured
-   FTMO costs; do not quote its numbers (see [Legacy pipeline](#legacy-pipeline)).
+   `metrics.py`) — a Dukascopy XAUUSD backtester demo. Its cost defaults are FTMO's measured
+   XAUUSD costs, but ⛔ do not quote its numbers (see [Legacy pipeline](#legacy-pipeline)).
 
 ## Time: UTC inside, Malaysian time on screen
 
@@ -65,14 +65,20 @@ refused, and a frame already converted to UTC is never converted twice.
 - **MYT / UTC display switch** (see above).
 - Prices at the instrument's own precision — 5-digit FX, 3-digit JPY, 2-digit gold —
   inferred from the bars, or set with the spec's `precision` field.
-- Trades (entry/exit, SL/TP) and rectangular **zones** drawn on the price axis.
+- Trades (entry/exit, SL/TP, P/L in `$`, `R` or pips) and rectangular **zones** drawn on the price
+  axis. A trade or zone time that is not a bar of the timeframe on screen (an M1 fill on an M15
+  page, an M15 entry on the H1 button) is drawn at the bar that contains it. Zone labels are cut
+  to the box; the full label shows in the status bar under the cursor.
 - Provider indicators (SMA / EMA / Bollinger / RSI / MACD) as toggle chips — never user-added.
 - Optional metrics panel (`stats`) and a **Trades** drawer listing every overlay trade.
 - Optional equity pane synchronised with the main chart.
 - Optional volume histogram, shown only when the spec carries a `volume` series.
 - Three drawing tools: **Hand**, **Rectangle**, **Horizontal line**.
-- Opens fully zoomed out; scroll to zoom, drag to pan, arrow keys to step.
-- Debug handle in the console: `window.ChartLab.debug()` (includes `tz` and `tzOffset`).
+- Opens fitted to its bars, or on the spec's `view` (setup pages open on their own window);
+  scroll to zoom, drag to pan, arrow keys to step, **Fit** / double-click for every bar.
+- Debug handle in the console: `window.ChartLab.debug()` (includes `tz`, `tzOffset`, the visible
+  range and `painted` — the trades and zones actually drawn, with their x positions);
+  `window.ChartLab.setTF("H1")` switches timeframe.
 
 Commands below use `python`. On macOS/Linux use `python3`; on Windows `python3` is often
 only a Microsoft Store shim, so `python` is the safe spelling.
@@ -147,6 +153,14 @@ native bars, 9 symbols × M1…MN). Override with `PRICEDATA_ROOT` or `root=`. T
 a file that is unsorted, has duplicate stamps, NaNs, incoherent OHLC or a timezone. Frames and
 `start=`/`end=` windows you get back are **UTC**.
 
+**Native bars are checked against M1.** A native M5…MN file can miss bars that M1 has (priceData's
+2026-09-23 refresh left EURUSD/GBPUSD/USDJPY M30–D1 holes from 2026-09-21). `build_spec` compares
+every native timeframe with the same bars built from M1 over the page's window and raises a
+`pricedata.DataWarning` naming what is missing or different (a frame without an M1 file is
+"NOT verified", never clean). `bars="m1"` (CLI `--bars m1`) builds every timeframe from M1 instead:
+bins cut on the FTMO server clock (MT5's grid), then converted to UTC. `verify_m1=False` /
+`--no-m1-check` skips the check. `pricedata.check_vs_m1(symbol, {tf: frame})` is the check itself.
+
 ### Route A — Python, in-process
 
 ```python
@@ -214,6 +228,11 @@ or in Python: `setups.setups_from_rows(rows, "M15", clock="ftmo", symbol="EURUSD
 | `zone` (`zones`) | | one zone or a list: `start`, `end`, `low`, `high`, optional `label`, `color` |
 | `label`, `id` (`ref`), `symbol`, `lots` | | ids become file names; duplicates are refused |
 | `exit_time`, `exit_price`, `net`, `reason` | | draws the outcome when present |
+| `net_unit` (`netUnit`) | | unit of `net`: `$` (default), `R` or `pips` — so −1.07 R reads `−1.07R`, not `−$1` |
+
+With native FTMO bars, `rows` and `setup` compare every page timeframe with M1 over the bars the
+pages show and print what disagrees and how many pages show it; `--bars m1` builds the pages from M1.
+Times that are M1-precise (fills, zone ends) need no snapping: the page draws them at the containing bar.
 
 What this is **not**: a zone is one rectangle here. If a page must show a zone's life stages
 (area → formed → live → spent) or engine-drawn refs/bands, use the MSNR_ea reference generator
@@ -233,9 +252,14 @@ research results.
 ## Legacy pipeline
 
 `download`, `build`, `resample`, `backtest` (and `--source dukascopy` on `chart`/`setup`)
-use a local Dukascopy XAUUSD M1 parquet under `data/parquet/` (UTC). ⛔ The backtest defaults
-are **not** FTMO's: no commission, $0.02 slippage, swap −14/−4 per lot (FTMO measured: gold
-swap −83/−8.3 pts, commission 0.0007 % of notional per side). Do not quote its numbers; use the
+use a local Dukascopy XAUUSD M1 parquet under `data/parquet/` (UTC). The backtest's cost defaults
+are FTMO's measured XAUUSD costs: commission 0.0007 % of notional per side, $0.05 slippage per
+fill, swap −83 / −8.3 USD per lot per night charged at **00:00 FTMO server time** for each weekday
+that ends with the position open, ×3 for Wednesday's (Wed→Thu) rollover, none at the weekend
+(`BacktestConfig.data_clock` = `"utc"` for Dukascopy bars, `"ftmo"` for server-time bars).
+A cost file saved before `commission_pct_side` existed gets the 0.0007 % default **added** to its
+flat commission — `CostConfig.from_json` warns; FX files should set `commission_pct_side: 0` and
+`commission_per_side_per_lot: 2.5`. ⛔ It is still a demo: do not quote its numbers; use the
 `backtest-method` skill for costed results.
 
 ```bash
@@ -266,8 +290,10 @@ chartlab/
 │   └── sample_spec.json            # a valid, renderable spec
 ├── tests/
 │   ├── test_chart.py               # generator, precision, display timezone (stdlib only)
-│   ├── test_pipeline.py            # export / priceData adapter / setups (needs pandas)
-│   └── test_sources.py             # FTMO<->UTC clock, identification, real-Dukascopy cross-check
+│   ├── test_pipeline.py            # export / priceData adapter + M1 check / setups (needs pandas)
+│   ├── test_sources.py             # FTMO<->UTC clock, identification, real-Dukascopy cross-check
+│   ├── test_viewer.py              # runs pages in headless Edge/Chrome: what is actually drawn
+│   └── test_engine.py              # legacy engine: swap at 00:00 FTMO server, Wed->Thu x3
 ├── sources.py          # FTMO vs Dukascopy: identification, UTC conversion, overlay clocks
 ├── pricedata.py        # FTMO priceData loader (strict, UTC) + build_spec
 ├── export.py           # frames -> spec blocks (priceData / lowercase / bid_ columns)
@@ -311,9 +337,12 @@ package by `run.py`; from Python, put the folder that *contains* `chartlab/` on 
 python -m unittest discover -s tests -v
 ```
 
-`test_pipeline.py` and `test_sources.py` skip themselves without pandas/pyarrow; their
-real-data classes read the priceData folder and the packaged Dukascopy library
-(`C:\personalCode\mtf-regime-engine-v22.4\data\library`) and skip when those are absent.
+`test_pipeline.py`, `test_sources.py` and `test_engine.py` skip themselves without
+pandas/pyarrow; their real-data classes read the priceData folder and the packaged Dukascopy
+library (`C:\personalCode\mtf-regime-engine-v22.4\data\library`) and skip when those are absent.
+`test_viewer.py` loads rendered pages in a headless Edge or Chrome and reads back what the viewer
+painted (`window.ChartLab.debug()`); it skips when no browser is found (`CHARTLAB_BROWSER` points
+at one). About 10 s.
 
 ## Documentation
 

@@ -7,11 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Fixes for the issues found generating 80 System 3 setup pages on 2026-09-23 (`todo.md`).
+
+### Fixed
+- **Overlays off the timeframe's grid were silently not drawn.** A trade or zone time that is not a
+  bar of the timeframe on screen (an M1-precise fill on an M15 page, an M15 entry on the H1 button)
+  is now drawn at the bar that contains it; the Trades drawer keeps the exact minute. A zone that
+  starts before the page and ends after it is drawn across it (it vanished), and an open trade whose
+  entry has scrolled off the left keeps its line.
+- **Short windows opened squeezed into the right of the chart** ("opens fully zoomed out"): the
+  initial fit only ran when bars were off screen, which a ~105-bar window never is at the default
+  7 px per bar. The page now re-applies its opening view until the chart's width settles and keeps
+  the time range on resize.
+- **`net` was always printed as dollars** (−1.07 R read `−$1`). See `netUnit` below.
+- **Zone labels ran past their box.** They are cut to the box with `…`; the full label shows in the
+  status bar when the cursor is inside the zone.
+- **Legacy engine swap timing.** Swap was charged only on a bar stamped exactly 00:00 of the data
+  clock (UTC on Dukascopy frames), tripled on the Tue→Wed night, and never at all on FTMO gold
+  (no bar at 00:00 server: break 23:50–01:05). It now rolls over at **00:00 FTMO server time** —
+  one night per weekday that ends with the position open, ×3 for Wednesday's (Wed→Thu, tester-verified
+  XAUUSD −83 → −249), none at the weekend — and is charged before the bar's orders, so a position
+  closed at the first bar after the rollover pays it and one opened there does not.
+  `BacktestConfig.data_clock` (`"utc"` default, `"ftmo"`) names the bars' clock.
+
+### Added
+- Spec field **`view`** `{from, to}` (UTC): the time range a page opens on (`chart.norm_view`,
+  `spec(view=)`, `pricedata.build_spec(view=, clock=)`). Setup pages open on their pre/post window.
+- Trade field **`netUnit`**: `"$"` (default), `"R"` (`−1.07R`) or `"pips"` (`+12.3 pips`); rows take
+  `net_unit`. Unknown units are refused (`chart.norm_net_unit`).
+- **Pages built from M1** — `pricedata.load_frame(..., bars="m1")`, `build_spec(bars="m1")`,
+  CLI `--bars m1` on `chart` / `setup` / `rows`: every timeframe aggregated from priceData M1 on the
+  FTMO server clock (MT5's grid, priceData's own rules), then converted to UTC.
+- **Native bars checked against M1 by default.** `pricedata.check_vs_m1` reports missing, mismatched
+  and orphan bars against the M1 build (no M1 file = "NOT verified", never clean); `build_spec` raises
+  a `pricedata.DataWarning`, and `setup` / `rows` print it over the bars the pages show with the number
+  of pages affected. `verify_m1=False` / `--no-m1-check` turns it off. On real data it reproduces
+  priceData's `verify_htf_vs_m1.py` count for count (EURUSD M30 65 / H1 32 / H4 8 missing from
+  2026-09-21, GBPUSD 82 / 41 / 10, USDJPY H1 41 / H4 10, a wrong D1 bar on all three) and finds 2025
+  clean on every timeframe.
+- `setups.page_windows`: the bars each setup page shows per timeframe (same cut as `slice_spec`).
+- `window.ChartLab.debug()` reports `painted` (the trades and zones actually drawn, with x positions),
+  `view`, `width`; `window.ChartLab.setTF(tf)`.
+- `tests/test_viewer.py` loads pages in headless Edge/Chrome and checks what is drawn (skipped without a
+  browser; `CHARTLAB_BROWSER`); `tests/test_engine.py` covers swap timing in both clocks.
+
 ### Changed
 - Legacy backtest cost defaults (`CostConfig`) are now FTMO's measured XAUUSD costs: commission 0.0007 % of notional
   per side (new field `commission_pct_side`, added to the flat `commission_per_side_per_lot`), slippage $0.05 per fill,
   swap -83 / -8.3 USD per lot per night. Source: FTMO account probe 2026-09-18 and MT5 tester cost probe 2026-09-23
-  (`testEGEA/results/mt5/egbook_costprobe.csv`). The engine is still a demo — see todo.md item 6.
+  (`testEGEA/results/mt5/egbook_costprobe.csv`). The engine is still a demo.
+- ⚠ A cost file saved before `commission_pct_side` existed gets the 0.0007 % default **added** to its flat
+  commission; `CostConfig.from_json` now warns. FX files should set `commission_pct_side: 0` and
+  `commission_per_side_per_lot: 2.5`.
 
 ## [0.3.0] - 2026-09-20
 

@@ -135,8 +135,8 @@ timeframe you want the switcher to offer; the viewer opens on `defaultTimeframe`
 
 ## FTMO and Dukascopy data, and the clock
 
-Two sources feed this research. **FTMO** bars come from `C:\personalCode\priceData` (native, no
-resampling, BID); **Dukascopy** bars are UTC. ChartLab keeps everything **UTC internally** —
+Two sources feed this research. **FTMO** bars come from `C:\personalCode\priceData` (native, BID,
+checked against M1 by default — `bars="m1"` builds them from M1); **Dukascopy** bars are UTC. ChartLab keeps everything **UTC internally** —
 session timings are UTC based — and *displays* Malaysian time (UTC+8) by default with a
 MYT / UTC switch in the page. The data is never shifted.
 
@@ -171,6 +171,13 @@ df = pricedata.load_frame("EURUSD", "M15")       # UTC index: df.index.hour is a
   `python run.py rows --rows rows.json --symbol EURUSD --timeframe M15 --clock ftmo --extra-tfs H1 H4 D1 --out <folder>`
   (row keys are in the README). A stop/target on the wrong side of the entry, a missing `--clock`, or a
   trigger outside the bars is refused with the row named — nothing is clamped or guessed.
+- ⚠ **Native higher timeframes can have holes.** `build_spec` compares each native M5…MN frame with
+  M1 over the page's window and raises `pricedata.DataWarning` if bars are missing or differ; `rows` /
+  `setup` print the same and how many pages show it. `bars="m1"` / `--bars m1` builds every timeframe
+  from M1 (the reference priceData verifies against).
+- **Times need not be on the page's grid.** An M1-precise fill on an M15 page, or an M15 entry on the
+  H1 button, is drawn at the bar that contains it. Give `net` a `netUnit` (`"R"`, `"pips"`; `"$"` is
+  the default) so the page does not print R as dollars.
 - Without pandas: `sys.path.insert(0, r"C:\personalCode\chartlab"); import chart` and pass your own UTC bars.
 
 ## Interpreting the output
@@ -179,7 +186,10 @@ df = pricedata.load_frame("EURUSD", "M15")       # UTC index: df.index.hour is a
   (loader pages fetch their own spec and locate the chart library beside the page).
 - Pages written by `render`/`render_file` work from `file://` and from any static server.
 - For diagnostics, the page exposes `window.ChartLab.debug()` in the browser console,
-  returning `{ ready, tf, bars, first, last, trades, zones, inds, stats, drawerOpen, visible, ... }`.
+  returning `{ ready, tf, bars, first, last, trades, zones, inds, stats, drawerOpen, visible, view,
+  painted: {trades, zones}, ... }` — `painted` lists what was actually drawn, so a page that renders
+  but draws nothing is visible. `window.ChartLab.setTF(tf)` switches timeframe (the headless tests
+  in `tests/test_viewer.py` drive pages this way).
 
 ## Performance and size guidance
 
