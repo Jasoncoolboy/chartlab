@@ -6,6 +6,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from . import sources
 from .config import BacktestConfig, CostConfig
 
 
@@ -107,11 +108,15 @@ def run_backtest(
     ns = ts.asi8
 
     # Vectorized calendar fields: avoids boxing a Timestamp per M1 row.
-    hour_a = np.asarray(ts.hour, dtype=np.int16)
-    minute_a = np.asarray(ts.minute, dtype=np.int16)
-    weekday_a = np.asarray(ts.weekday, dtype=np.int8)
     day_a = np.asarray(ts.normalize(), dtype="datetime64[ns]")
-    midnight = (hour_a == 0) & (minute_a == 0)
+    # Swap rolls over at 00:00 FTMO SERVER time, whatever clock the bars are in, and is found as a
+    # change of server day between two bars: gold has no bar at 00:00 server (daily break
+    # 23:50-01:05), so testing for a bar at midnight would never charge it on FTMO data.
+    clock = getattr(bt, "data_clock", "utc")
+    if clock not in ("utc", "ftmo"):
+        raise ValueError(f"BacktestConfig.data_clock must be 'utc' or 'ftmo', got {clock!r}")
+    server = sources.utc_to_ftmo_server(ts) if clock == "utc" else sources._naive_ns(ts)
+    server_day = server.asi8 // 86_400_000_000_000          # whole days since 1970-01-01 (a Thursday)
 
     signal = strategy.prepare(signal)
     tf_open_ns = signal.index.asi8
@@ -161,16 +166,20 @@ def run_backtest(
         pos = _Position(direction, lots, ts[i], px, i, day_a[i], sl, tp, commission)
 
     def check_swap(i: int):
+        """Charge every server day that ended between bar i-1 and bar i: Monday to Friday one
+        night each, Wednesday (the Wed->Thu rollover) three, Saturday and Sunday none."""
         nonlocal cash
-        if pos is None:
+        if pos is None or i == 0 or server_day[i] == server_day[i - 1]:
             return
-        if hour_a[i] != 0 or minute_a[i] != 0:
-            return
-        if day_a[i] <= pos.entry_day:
+        nights = 0
+        for d in range(int(server_day[i - 1]), int(server_day[i])):
+            wd = (d + 3) % 7                                  # Monday = 0
+            if wd < 5:
+                nights += 3 if (triple and wd == 2) else 1
+        if not nights:
             return
         rate = swap_long if pos.dir > 0 else swap_short
-        mult = 3.0 if (triple and weekday_a[i] == 2) else 1.0
-        amt = rate * pos.lots * mult
+        amt = rate * pos.lots * nights
         pos.swap += amt
         cash += amt
 
@@ -178,6 +187,9 @@ def run_backtest(
     cur_day = None
     last_mark = cash
     for i in range(n):
+        # Before this bar's orders: a position closed at this open was still held over the rollover
+        # (it pays); one opened at this open was not (it does not).
+        check_swap(i)
         if pending is not None:
             for action in pending:
                 if action == "close" and pos is not None:
@@ -187,9 +199,6 @@ def run_backtest(
                     open_pos(action["dir"], action["lots"],
                              action.get("sl", 0.0), action.get("tp", 0.0), i)
             pending = None
-
-        if midnight[i]:
-            check_swap(i)
 
         if pos is not None:
             hit = None

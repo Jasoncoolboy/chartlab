@@ -43,9 +43,9 @@ def cmd_resample(args):
 
 
 def cmd_backtest(args):
-    print("warning: legacy backtest - Dukascopy XAUUSD only. Cost defaults are FTMO's measured XAUUSD costs "
-          "(0.0007 %/side commission, $0.05 slippage, swap -83/-8.3) but swap rolls at 00:00 of the data clock "
-          "with Wednesday x3, not FTMO's 00:00-server Wed->Thu x3; do not quote its numbers.",
+    print("warning: legacy backtest - a Dukascopy XAUUSD demo. Cost defaults are FTMO's measured XAUUSD costs "
+          "(0.0007 %/side commission, $0.05 slippage, swap -83/-8.3 rolled at 00:00 FTMO server time, "
+          "Wed->Thu x3); do not quote its numbers - use the backtest-method rules.",
           file=sys.stderr)
     cost = CostConfig.from_json(args.cost_file) if args.cost_file else CostConfig()
     bt = BacktestConfig(default_lots=args.lots, signal_timeframe=args.timeframe)
@@ -346,7 +346,7 @@ def main(argv=None):
     p = sub.add_parser("resample", help="resample M1 into higher timeframes")
     p.set_defaults(func=cmd_resample)
 
-    p = sub.add_parser("backtest", help="legacy backtest: Dukascopy XAUUSD only, costs are NOT FTMO-measured")
+    p = sub.add_parser("backtest", help="legacy backtest demo: Dukascopy XAUUSD only, never quote its numbers")
     p.add_argument("--strategy", default="donchian", choices=["donchian", "macross"])
     p.add_argument("--timeframe", default="D1")
     p.add_argument("--n", type=int, default=20)

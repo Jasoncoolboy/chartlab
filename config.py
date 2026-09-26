@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -29,7 +30,9 @@ class CostConfig:
 
     # Defaults = FTMO's MEASURED XAUUSD costs (account probe 2026-09-18, MT5 tester probe 2026-09-23, see the global
     # CLAUDE.md FTMO section): commission 0.0007 % of notional PER SIDE (~$3.02/lot/side at 4,314), slippage allowance
-    # $0.05 per market fill, swap -83 / -8.3 USD per lot per night (points x $1), Wednesday night x3.
+    # $0.05 per market fill, swap -83 / -8.3 USD per lot per night (points x $1). Swap is charged at
+    # 00:00 FTMO server time for each weekday that ends with the position open, x3 for Wednesday's
+    # (the Wed->Thu rollover, tester-verified), none for Saturday/Sunday.
     commission_per_side_per_lot: float = 0.0     # flat $/lot/side (FX: 2.50); added to the percent below
     commission_pct_side: float = 0.0007          # percent of notional per side (metals 0.0007, BTC 0.0325, FX 0)
     slippage_per_side_usd: float = 0.05
@@ -37,19 +40,29 @@ class CostConfig:
 
     swap_long_per_lot_per_day: float = -83.0
     swap_short_per_lot_per_day: float = -8.3
-    triple_swap_on_wednesday: bool = True
+    triple_swap_on_wednesday: bool = True        # x3 on the Wed->Thu rollover (00:00 Thursday server)
 
     def to_json(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps(asdict(self), indent=2))
 
     @classmethod
     def from_json(cls, path: str | Path) -> "CostConfig":
-        return cls(**json.loads(Path(path).read_text()))
+        raw = json.loads(Path(path).read_text())
+        if "commission_pct_side" not in raw and raw.get("commission_per_side_per_lot", 0):
+            # Saved before commission_pct_side existed: its flat figure was the whole commission, and
+            # the 0.0007 % default would now be charged on top of it.
+            warnings.warn(
+                f"{path}: no commission_pct_side, so the default {cls.commission_pct_side} % of notional "
+                f"per side is ADDED to commission_per_side_per_lot={raw['commission_per_side_per_lot']}. "
+                "Set commission_pct_side explicitly (FX: 0 with 2.5 flat; metals: 0.0007 with 0 flat).",
+                UserWarning, stacklevel=2)
+        return cls(**raw)
 
 
 @dataclass
 class BacktestConfig:
     signal_timeframe: str = "D1"
+    data_clock: str = "utc"          # clock of the M1 bars: "utc" (Dukascopy) or "ftmo" (server time)
     start_capital_usd: float = 100_000.0
     default_lots: float = 0.5
     stop_if_sl_tp_same_bar: bool = True
