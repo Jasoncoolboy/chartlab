@@ -446,6 +446,58 @@ class TestDisplayTimezone(unittest.TestCase):
         self.assertIn("tzOffset:OFF", html)                   # debug() exposes the applied offset
 
 
+class TestOpeningView(unittest.TestCase):
+    """``view`` = the time range a page opens on (todo item 4); UTC like every spec time."""
+
+    def test_view_forms_are_normalized(self):
+        want = {"from": 1704067200, "to": 1704153600}
+        self.assertEqual(chart.norm_view({"from": 1704067200, "to": 1704153600}), want)
+        self.assertEqual(chart.norm_view({"start": "2024-01-01", "end": "2024-01-02T00:00:00Z"}), want)
+        self.assertEqual(chart.norm_view((1704067200, "2024-01-02 00:00")), want)
+
+    def test_bad_views_are_refused(self):
+        for bad in ({"from": 5}, (3, 3), (4, 2), 7, "2024-01-01"):
+            with self.assertRaises((ValueError, TypeError), msg=repr(bad)):
+                chart.norm_view(bad)
+
+    def test_spec_normalize_and_validate_carry_it(self):
+        s = chart.spec("X", {"D1": _bars(3)}, view=(1704067200, 1704153600))
+        self.assertEqual(s["view"], {"from": 1704067200, "to": 1704153600})
+        self.assertNotIn("view", chart.spec("X", {"D1": _bars(3)}))
+        n = chart.normalize({"symbol": "X", "timeframes": {"D1": _bars(3)},
+                             "view": {"from": "2024-01-01", "to": "2024-01-02"}})
+        self.assertEqual(n["view"], {"from": 1704067200, "to": 1704153600})
+        s["view"] = {"from": 9, "to": 1}
+        self.assertTrue(any("view" in p for p in chart.validate(s)))
+
+    def test_viewer_opens_on_the_view_after_layout(self):
+        html = (chart.ASSETS / chart.VIEWER_NAME).read_text(encoding="utf-8")
+        self.assertIn("function openView", html)
+        self.assertIn("lockVisibleTimeRangeOnResize:true", html)
+        self.assertIn("vw.from+OFF", html)       # the view is UTC; the display is shifted
+
+
+class TestNetUnit(unittest.TestCase):
+    """todo item 2: a trade's ``net`` carries its unit; dollars stay the default."""
+
+    def test_units_and_aliases(self):
+        base = {"dir": "long", "entryTime": 1704067200, "entryPrice": 1.1, "net": -1.1}
+        self.assertNotIn("netUnit", chart.trades_from_rows([base])[0])
+        for given, want in (("R", "R"), ("r", "R"), ("pips", "pips"), ("pip", "pips"),
+                            ("$", "$"), ("USD", "$")):
+            self.assertEqual(chart.trades_from_rows([dict(base, net_unit=given)])[0]["netUnit"], want)
+        self.assertEqual(chart.trades_from_rows([dict(base, netUnit="R")])[0]["netUnit"], "R")
+
+    def test_unknown_unit_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "net unit"):
+            chart.trades_from_rows([{"dir": "long", "entryTime": 1, "entryPrice": 1.0, "netUnit": "EUR"}])
+
+    def test_viewer_formats_every_net_through_one_helper(self):
+        html = (chart.ASSETS / chart.VIEWER_NAME).read_text(encoding="utf-8")
+        self.assertIn("function fmtNet", html)
+        self.assertEqual(html.count('"$"+Math.abs'), 0)          # no hard-coded dollar formatting left
+
+
 class TestLoader(unittest.TestCase):
     def test_render_loader_embeds_url(self):
         with tempfile.TemporaryDirectory() as tmp:

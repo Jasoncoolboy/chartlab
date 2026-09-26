@@ -94,12 +94,13 @@ def build_spec(symbol: str, timeframes=("H4", "D1"), *, default_tf: str | None =
                start=None, end=None, max_bars: int | None = None, volume: bool = False,
                trades=None, zones=None, equity=None, clock: str | None = None,
                indicators=None, stats=None, title: str | None = None,
-               tz: str | None = None, root: str | Path | None = None) -> dict:
+               tz: str | None = None, root: str | Path | None = None, view=None) -> dict:
     """A chart spec of native priceData bars in ``timeframes`` plus any overlay.
 
     Bars are converted to true UTC. ``clock`` names the clock of the times in
-    ``trades`` / ``zones`` / ``equity`` ('ftmo', 'utc', 'myt') and is REQUIRED
-    when any are given. ``tz`` (UTC or MYT, default MYT) is only the viewer's
+    ``trades`` / ``zones`` / ``equity`` / ``view`` ('ftmo', 'utc', 'myt') and is
+    REQUIRED when any are given. ``view`` (``{from, to}`` or a pair) is the time
+    range the page opens on (default: every bar). ``tz`` (UTC or MYT, default MYT) is only the viewer's
     initial display zone. ``default_tf`` defaults to the first timeframe.
     ``indicators`` is a list of indicator dicts or a string like
     ``"SMA50,EMA200,RSI14"`` (drawn on the default timeframe). Pass ``max_bars``
@@ -113,6 +114,11 @@ def build_spec(symbol: str, timeframes=("H4", "D1"), *, default_tf: str | None =
     if default_tf not in tfs:
         raise ValueError(f"default_tf {default_tf!r} is not in timeframes {tfs}")
     trades, zones, equity = sources.convert_overlay(trades, zones, equity, clock)
+    if view is not None:
+        lo, hi = ((view.get("from", view.get("start")), view.get("to", view.get("end")))
+                  if isinstance(view, dict) else view)
+        vclock = sources._need_clock(clock, "view")
+        view = (sources.to_utc_epoch(lo, vclock), sources.to_utc_epoch(hi, vclock))
     blocks = {}
     for tf in tfs:
         df = load_frame(symbol, tf, start=start, end=end, max_bars=max_bars, root=root)
@@ -125,7 +131,7 @@ def build_spec(symbol: str, timeframes=("H4", "D1"), *, default_tf: str | None =
     s = chart.spec(symbol.upper(), blocks, exchange=EXCHANGE, source=SOURCE,
                    period_label=f"{default_tf} · {symbol.upper()} · BID",
                    default_tf=default_tf, trades=trades, zones=zones, equity=equity,
-                   indicators=indicators or None, stats=stats, title=title, tz=tz)
+                   indicators=indicators or None, stats=stats, title=title, tz=tz, view=view)
     problems = chart.validate(s)
     if problems:
         raise ValueError("invalid spec: " + "; ".join(problems))

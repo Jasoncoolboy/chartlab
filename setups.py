@@ -44,6 +44,7 @@ class Setup:
     exit_price: float | None = None
     net: float | None = None
     reason: str = ""
+    net_unit: str | None = None        # unit of ``net``: "$" (default), "R" or "pips"
 
     def rr(self) -> float | None:
         if not self.stop or not self.target:
@@ -279,11 +280,15 @@ def slice_spec(df: pd.DataFrame, setup: Setup, pre_bars: int = 60,
     if setup.exit_time is not None:
         trade.update(exitTime=setup.exit_time, exitPrice=setup.exit_price,
                      net=setup.net, reason=setup.reason or None)
+    if setup.net is not None and setup.net_unit:
+        trade["netUnit"] = setup.net_unit
+    sub_t = _epoch_array(sub.index)
+    view = (int(sub_t[0]), int(sub_t[-1])) if len(sub_t) > 1 else None
     return chart.spec(
         setup.symbol or symbol or "Chart", blocks, exchange=exchange, source=source,
         tz=tz, period_label=tf, default_tf=tf,
         trades=[trade], zones=_zones_of(setup),
-        indicators=setup_indicators(sub, setup))
+        indicators=setup_indicators(sub, setup), view=view)
 
 
 def write_catalog(out_dir: Path, setups: list[Setup], cfg: dict) -> Path:
@@ -389,6 +394,15 @@ def _num(i: int, name: str, value, required: bool = False):
     return v
 
 
+def _net_unit(i: int, value):
+    if value is None:
+        return None
+    try:
+        return chart.norm_net_unit(value)
+    except ValueError as exc:
+        raise ValueError(f"row {i}: {exc}") from None
+
+
 def setups_from_rows(rows, tf: str, *, clock: str | None = None, symbol: str = "",
                      kind: str = "external") -> list[Setup]:
     """Turn another system's setup rows into ``Setup`` objects for ``render_pages``.
@@ -398,7 +412,8 @@ def setups_from_rows(rows, tf: str, *, clock: str | None = None, symbol: str = "
     (or ``entry``). Optional: ``trigger_time`` (or ``arm``; default the entry
     time), ``stop``/``sl``, ``target``/``tp``, ``zone`` (a zone dict or list of
     them: start/end/low/high[/label/color]), ``label``, ``id``, ``symbol``,
-    ``lots``, ``exit_time``, ``exit_price``, ``net``, ``reason``.
+    ``lots``, ``exit_time``, ``exit_price``, ``net``, ``net_unit`` (the unit of
+    ``net``: ``"$"`` default, ``"R"`` or ``"pips"``), ``reason``.
 
     Times are epoch seconds, ISO strings or datetimes and ``clock`` is REQUIRED:
     it names the clock of every bare (zone-less) time in the rows - ``'ftmo'``
@@ -451,5 +466,6 @@ def setups_from_rows(rows, tf: str, *, clock: str | None = None, symbol: str = "
             symbol=str(_pick(r, "symbol") or symbol), lots=lots,
             exit_time=sources.to_utc_epoch(xt, clock) if xt is not None else None,
             exit_price=_num(i, "exit_price", _pick(r, "exit_price", "exitPrice")),
-            net=_num(i, "net", _pick(r, "net")), reason=str(_pick(r, "reason") or "")))
+            net=_num(i, "net", _pick(r, "net")), reason=str(_pick(r, "reason") or ""),
+            net_unit=_net_unit(i, _pick(r, "net_unit", "netUnit"))))
     return out

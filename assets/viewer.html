@@ -149,6 +149,7 @@ var candleCache={},indCalcCache={},drawerRendered=0,hoverTrade=null;
 var PAL=["#2962ff","#e91e63","#7b1fa2","#00897b","#f4511e","#c0ca33","#5e35b1","#00acc1"];
 var chart,series,volumeSeries,eqChart,eqSeries,canvas,ctx;
 var curTF=null,drawings=[],drawMode=null,drawBuf=null,dpr=1,indSeries=[];
+var PAINTED={zones:[],trades:[]};
 function $(id){return document.getElementById(id)}
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
 function b64bytes(v){var bin=atob(v||""),n=bin.length,u=new Uint8Array(n);for(var i=0;i<n;i++)u[i]=bin.charCodeAt(i);return u}
@@ -260,7 +261,7 @@ function init(){
     layout:{background:{type:"solid",color:"#131722"},textColor:"#d1d4dc",fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',fontSize:11},
     grid:{vertLines:{color:"#1e222d"},horzLines:{color:"#1e222d"}},
     rightPriceScale:{borderColor:"#2a2e39",scaleMargins:{top:0.06,bottom:0.06}},
-    timeScale:{borderColor:"#2a2e39",timeVisible:true,secondsVisible:false,rightOffset:5,barSpacing:7,minBarSpacing:0.01,fixRightEdge:true},
+    timeScale:{borderColor:"#2a2e39",timeVisible:true,secondsVisible:false,rightOffset:5,barSpacing:7,minBarSpacing:0.01,fixRightEdge:true,lockVisibleTimeRangeOnResize:true},
     crosshair:{mode:1,vertLine:{color:"#758696",width:1,style:3,labelBackgroundColor:"#363c4e"},horzLine:{color:"#758696",width:1,style:3,labelBackgroundColor:"#363c4e"}},
     handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},
     handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true},
@@ -288,19 +289,22 @@ function init(){
   chart.subscribeCrosshairMove(onCrosshair);
   chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
   setTF(defTF);
-  function covered(){
-    try{
-      var vr=chart.timeScale().getVisibleRange();
-      var t=TFS[curTF].time;
-      return !!(vr&&t.length&&vr.from<=t[0]&&vr.to>=t[t.length-1]);
-    }catch(e){return false}
+  // Open on the spec's view (else fit every bar) and re-apply it until the chart's width has
+  // settled: a view applied before the final layout keeps the default 7 px bar spacing, which
+  // left a short setup window squeezed into the right part of the chart.
+  function openView(){
+    var ts=chart.timeScale(),vw=PAY.view;
+    if(vw&&vw.from!=null&&vw.to!=null){try{ts.setVisibleRange({from:vw.from+OFF,to:vw.to+OFF});return}catch(e){}}
+    ts.fitContent();
   }
-  var fitUntil=Date.now()+5000,fitTimer=null;
+  var fitUntil=Date.now()+5000,fitTimer=null,fitW=-1,fitStable=0;
   function initialFit(){
-    if(Date.now()>fitUntil||covered())return;
+    if(Date.now()>fitUntil)return;
     fitCanvas();
-    chart.timeScale().fitContent();
-    if(!covered())fitTimer=setTimeout(initialFit,60);
+    var w=Math.round($("chart").getBoundingClientRect().width);
+    if(w!==fitW){fitW=w;fitStable=0}else fitStable++;
+    openView();
+    if(fitStable<3)fitTimer=setTimeout(initialFit,60);
   }
   ["pointerdown","wheel","touchstart","keydown"].forEach(function(ev){
     $("chart").addEventListener(ev,function(){fitUntil=0;clearTimeout(fitTimer)},{passive:true});
@@ -517,6 +521,7 @@ function onCrosshair(param){
       txt.push(nm+" "+iv.value.toFixed(String(o.def.type||"").toLowerCase()==="rsi"?2:PREC));
     }
   });
+  zonesAt(param.time,px).forEach(function(l){txt.push("Zone: "+l)});
   stD.textContent=txt.join("  |  ");
 }
 function defaultLegend(){
@@ -553,7 +558,37 @@ function fitCanvas(){
   }
   redraw();
 }
-function timeX(t){var x=chart.timeScale().timeToCoordinate(t);return (x===null||x===undefined)?null:x}
+// Overlay times need not be bars of the shown timeframe (an M1 fill on an M15 page, an M15 entry
+// on the H1 button); timeToCoordinate is null off-grid, so such a time is drawn at the bar that
+// CONTAINS it. Before the first bar, or past the last bar's own span, it is off the page (null).
+function barStep(a){
+  var s=0,n=a.length;
+  for(var i=Math.max(1,n-50);i<n;i++){var d=a[i]-a[i-1];if(d>0&&(!s||d<s))s=d}
+  return s||86400;
+}
+function barAt(t){
+  var a=curTF&&TFS[curTF]?TFS[curTF].time:null;
+  if(!a||!a.length||t<a[0])return -1;
+  var lo=0,hi=a.length-1;
+  while(lo<hi){var mid=(lo+hi+1)>>1;if(a[mid]<=t)lo=mid;else hi=mid-1}
+  if(lo===a.length-1&&t>=a[lo]+barStep(a))return -1;
+  return lo;
+}
+function timeSide(t){
+  var a=curTF&&TFS[curTF]?TFS[curTF].time:null;
+  if(!a||!a.length)return 0;
+  return t<a[0]?-1:(barAt(t)<0?1:0);
+}
+function timeX(t){
+  if(t===null||t===undefined)return null;
+  var ts=chart.timeScale(),x=ts.timeToCoordinate(t);
+  if(x===null||x===undefined){
+    var i=barAt(t);
+    if(i<0)return null;
+    x=ts.timeToCoordinate(TFS[curTF].time[i]);
+  }
+  return (x===null||x===undefined)?null:x;
+}
 function xTime(x){var t=chart.timeScale().coordinateToTime(x);return (t===null||t===undefined)?null:t}
 function pxY(p){
   if(!series)return null;
@@ -585,36 +620,60 @@ function paint(zonesOn,tradesOn,extras){
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,r.width,r.height);
   var v=vRange();
+  PAINTED={zones:[],trades:[]};
   if(zonesOn)paintZones(v);
   if(tradesOn)paintTrades(v);
   paintD(v,drawings);
   if(extras)paintD(v,extras);
 }
 function redraw(){paint($("ckZones").checked,$("ckTrades").checked,null)}
-function paintZones(v){
+function fitText(s,w){
+  if(ctx.measureText(s).width<=w)return s;
+  var lo=0,hi=s.length;
+  while(lo<hi){var mid=(lo+hi+1)>>1;if(ctx.measureText(s.slice(0,mid)+"…").width<=w)lo=mid;else hi=mid-1}
+  return lo?s.slice(0,lo).replace(/\s+$/,"")+"…":"";
+}
+function zonesAt(t,p){
+  var out=[];
+  if(t==null||p==null||!$("ckZones").checked)return out;
   ZONES.forEach(function(z){
+    var s=barAt(z.start),from=s>=0?Math.min(z.start,TFS[curTF].time[s]):z.start;   // an off-grid start counts from its bar
+    if(z.label&&t>=from&&t<=z.end&&p>=Math.min(z.low,z.high)&&p<=Math.max(z.low,z.high))out.push(z.label);
+  });
+  return out;
+}
+function paintZones(v){
+  ZONES.forEach(function(z,zi){
     var xa=timeX(z.start),xb=timeX(z.end);
-    if(xa===null&&xb===null)return;
-    if(xa===null)xa=v.x0;if(xb===null)xb=v.x1;
+    // An end off the page is its edge; a zone that starts after the page or ends before it is not on it.
+    if(xa===null){if(timeSide(z.start)>0)return;xa=v.x0}
+    if(xb===null){if(timeSide(z.end)<0)return;xb=v.x1}
     if(xb<v.x0||xa>v.x1)return;
     var yh=yPx(z.high),yl=yPx(z.low);
     if(yh===null||yl===null)return;
     var col=z.color||"#2962ff";
     ctx.fillStyle=hexA(col,0.12);ctx.fillRect(xa,yh,xb-xa,yl-yh);
     ctx.strokeStyle=hexA(col,0.6);ctx.lineWidth=1;ctx.strokeRect(xa+0.5,yh+0.5,xb-xa-1,yl-yh-1);
-    if(z.label&&(xb-xa)>90&&yl-yh>24){
+    var pz={i:zi,xa:xa,xb:xb};
+    // The label starts at the box's visible left edge and is cut to the box (full text: status bar).
+    var lx=Math.max(xa,0)+6,room=xb-lx-6;
+    if(z.label&&room>=24&&yl-yh>24){
       ctx.font="500 11px -apple-system,sans-serif";ctx.fillStyle=col;
-      ctx.fillText(z.label,xa+6,yh+14);
+      var txt=fitText(z.label,room);
+      if(txt){ctx.fillText(txt,lx,yh+14);pz.label=txt;pz.labelX=lx;pz.labelW=ctx.measureText(txt).width}
     }
+    PAINTED.zones.push(pz);
   });
 }
 function paintTrades(v){
-  TRADES.forEach(function(tr){
+  TRADES.forEach(function(tr,ti){
     var col=tr.dir==="short"?"#ef5350":"#26a69a";
     var xa=timeX(tr.entryTime);
     if(xa===null||xa>v.x1)return;
-    var xb=(tr.exitTime!==undefined&&tr.exitTime!==null)?timeX(tr.exitTime):null;
-    if(xa<v.x0&&(xb===null||xb<v.x0))return;
+    var hasExit=tr.exitTime!==undefined&&tr.exitTime!==null;
+    var xb=hasExit?timeX(tr.exitTime):null;
+    // xb null with an exit = the exit is past the page, so the trade runs to the right edge.
+    if(xa<v.x0&&hasExit&&xb!==null&&xb<v.x0)return;
     if(tr===hoverTrade){
       var hx0=Math.max(xa,v.x0),hx1=Math.min(xb===null?v.x1:xb,v.x1);
       if(hx1>hx0){ctx.fillStyle="rgba(41,98,255,0.12)";ctx.fillRect(hx0,0,hx1-hx0,v.h);}
@@ -634,7 +693,8 @@ function paintTrades(v){
     var dirlab=tr.dir==="long"?"L":"S";
     var lbl=dirlab+" "+(tr.lots?tr.lots.toFixed(2):"")+" @"+fp(tr.entryPrice);
     if(tr.exitPrice!=null)lbl+=" -> "+fp(tr.exitPrice);
-    if(tr.net!=null){var n=tr.net;lbl+="  "+(n>=0?"+":"-")+"$"+Math.abs(n).toFixed(0);}
+    if(tr.net!=null)lbl+="  "+fmtNet(tr);
+    PAINTED.trades.push({i:ti,xa:xa,xb:xb,xEnd:xEnd,y:ye,label:lbl});
     var lr=chart.timeScale().getVisibleLogicalRange();
     var vbars=lr?(lr.to-lr.from):9999;
     if(vbars<150&&v.x1-xa>120&&ye>16&&ye<v.h-14){
@@ -779,12 +839,19 @@ function rowFrom(el){
   }
   return null;
 }
+// A trade's net in its own unit: dollars whole (the default), R to 0.01, pips to 0.1.
+function fmtNet(tr){
+  var n=+tr.net,u=tr.netUnit||"$",s=n>=0?"+":"−",a=Math.abs(n);
+  if(u==="R")return s+a.toFixed(2)+"R";
+  if(u==="pips")return s+a.toFixed(1)+" pips";
+  return s+"$"+a.toFixed(0);
+}
 function tradeRowHtml(tr,i){
   var d=tr.dir==="short"?"down":"up";
   var arrow=tr.dir==="short"?"S":"L";
   var px=fp(tr.entryPrice)+((tr.exitPrice!==undefined&&tr.exitPrice!==null)?" \u2192 "+fp(tr.exitPrice):"");
   var nt="",tone="";
-  if(tr.net!==undefined&&tr.net!==null){nt=(tr.net>=0?"+":"\u2212")+"$"+Math.abs(tr.net).toFixed(0);tone=tr.net>=0?"up":"down";}
+  if(tr.net!==undefined&&tr.net!==null){nt=fmtNet(tr);tone=tr.net>=0?"up":"down";}
   return "<div class='tr' data-i='"+i+"'><span class='d "+d+"'>"+arrow+"</span><span class='tm'>"+esc(fmtT(tr.entryTime))+"</span><span class='px'>"+px+"</span><span class='nt "+tone+"'>"+nt+"</span></div>";
 }
 function renderDrawerChunk(){
@@ -848,7 +915,11 @@ function debug(){
   if(!series)return {ready:false};
   var vr=chart.timeScale().getVisibleRange();
   var defs=INDS[curTF]||[];
+  var T=TFS[curTF].time,r=$("chart").getBoundingClientRect();
   return {
+    painted:{zones:PAINTED.zones.slice(),trades:PAINTED.trades.slice()},
+    width:r.width,firstX:T.length?timeX(T[0]):null,lastX:T.length?timeX(T[T.length-1]):null,
+    view:PAY.view||null,
     ready:true,zones:ZONES.length,trades:TRADES.length,
     zonesOn:$("ckZones").checked,drawings:drawings.length,
     drawingList:drawings.map(function(d){return d;}),
@@ -862,7 +933,7 @@ function debug(){
     bars:TFS[curTF].time.length,visible:vr?{from:vr.from,to:vr.to}:null
   };
 }
-window.ChartLab={debug:debug};
+window.ChartLab={debug:debug,setTF:function(tf){setTF(tf)},timeframes:function(){return Object.keys(TFS)},zonesAt:zonesAt};
 window.__chartDebug=debug;
 boot();
 })();

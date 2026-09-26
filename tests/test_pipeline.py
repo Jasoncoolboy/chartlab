@@ -49,7 +49,7 @@ def _load_package():
 
 if pd is not None:
     _load_package()
-    from chartlab import chart, export, pricedata, setups  # noqa: E402
+    from chartlab import chart, export, pricedata, setups, sources  # noqa: E402
 
 
 def make_frame(n=300, start="2026-01-05", freq="15min", base=1.1, digits=5, seed=1,
@@ -197,6 +197,14 @@ class TestPriceDataAdapter(unittest.TestCase):
         with self.assertRaises(ValueError):
             pricedata.build_spec("EURUSD", [], root=self.root)
 
+    def test_build_spec_view_needs_a_clock_and_is_converted(self):
+        with self.assertRaises(sources.ClockError):
+            pricedata.build_spec("EURUSD", ["M15"], root=self.root, view=("2026-01-06 10:00", "2026-01-06 14:00"))
+        s = pricedata.build_spec("EURUSD", ["M15"], root=self.root, clock="ftmo",
+                                 view={"from": "2026-01-06 10:00", "to": "2026-01-06 14:00"})
+        utc = lambda t: int(pd.Timestamp(t, tz="UTC").timestamp())
+        self.assertEqual(s["view"], {"from": utc("2026-01-06 08:00"), "to": utc("2026-01-06 12:00")})
+
     def test_page_size_guard(self):
         old = pricedata.MAX_BARS_PER_TF
         pricedata.MAX_BARS_PER_TF = 100
@@ -327,6 +335,17 @@ class TestSetups(unittest.TestCase):
         self.assertEqual((tr["net"], tr["reason"]), (12.5, "tp"))
         self.assertEqual((page["tz"], page["source"]), ("UTC", "ftmo"))
         self.assertEqual(chart.validate(page), [])
+        # The page opens on its own pre/post window (todo item 4).
+        self.assertEqual(page["view"], {"from": b["time"][0], "to": b["time"][-1]})
+        self.assertNotIn("netUnit", tr)                     # dollars by default
+
+    def test_net_unit_from_rows(self):
+        (s,) = _setups([self._row(exit_time=str(self.df.index[320]), exit_price=1.1,
+                                  net=-1.07, net_unit="R")], "M15")
+        self.assertEqual(s.net_unit, "R")
+        self.assertEqual(setups.slice_spec(self.df, s)["overlay"]["trades"][0]["netUnit"], "R")
+        with self.assertRaisesRegex(ValueError, "row 0.*net unit"):
+            _setups([self._row(net=1.0, net_unit="points")], "M15")
 
     def test_trigger_outside_the_bars_is_refused_not_clamped(self):
         far = self._row(arm="2031-01-01 00:00", entry_time="2031-01-01 00:15")

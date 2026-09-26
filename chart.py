@@ -166,7 +166,23 @@ def _norm_trade(t: dict) -> dict:
             continue
         out[dst] = to_epoch(val) if dst.endswith("Time") else (
             float(val) if dst in ("exitPrice", "net", "sl", "tp") else str(val))
+    unit = pick("netUnit", "net_unit")
+    if unit is not None:
+        out["netUnit"] = norm_net_unit(unit)
     return out
+
+
+# The unit a trade's ``net`` is in: dollars (the default) are shown whole, R and pips with decimals.
+NET_UNITS = {"$": "$", "usd": "$", "r": "R", "pips": "pips", "pip": "pips"}
+
+
+def norm_net_unit(unit) -> str:
+    """``"$"`` (default), ``"R"`` or ``"pips"``; aliases usd / r / pip. Anything else raises."""
+    key = str(unit).strip()
+    key = key if key == "$" else key.lower()
+    if key not in NET_UNITS:
+        raise ValueError(f"net unit must be '$', 'R' or 'pips', got {unit!r}")
+    return NET_UNITS[key]
 
 
 def trades_from_rows(rows) -> list:
@@ -217,6 +233,25 @@ def _norm_indicator(ind: dict) -> dict:
 
 def indicators_from_rows(rows) -> list:
     return [_norm_indicator(dict(i)) for i in rows]
+
+
+def norm_view(view) -> dict:
+    """The time range a page opens on: ``{from, to}`` (or ``start``/``end``, or a
+    ``(from, to)`` pair) -> ``{"from": epoch, "to": epoch}``, UTC like every spec time."""
+    if isinstance(view, dict):
+        lo = view.get("from", view.get("start"))
+        hi = view.get("to", view.get("end"))
+    else:
+        try:
+            lo, hi = view
+        except (TypeError, ValueError):
+            raise ValueError(f"view must be {{'from': t, 'to': t}} or a (from, to) pair, got {view!r}") from None
+    if lo is None or hi is None:
+        raise ValueError(f"view needs both 'from' and 'to', got {view!r}")
+    lo, hi = to_epoch(lo), to_epoch(hi)
+    if lo >= hi:
+        raise ValueError(f"view 'from' must be before 'to' ({to_iso(lo)} .. {to_iso(hi)} UTC)")
+    return {"from": lo, "to": hi}
 
 
 _TONES = {"up": "up", "down": "down", "pos": "up", "positive": "up",
@@ -370,14 +405,15 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
          default_tf: str | None = None, trades=None, zones=None, equity=None,
          indicators=None, stats=None, title: str | None = None,
          precision: int | None = None, source: str | None = None,
-         tz: str | None = None) -> dict:
+         tz: str | None = None, view=None) -> dict:
     """Assemble and validate a chart spec from flexible inputs.
 
     ``precision`` is the number of price decimals the viewer shows; when
     omitted it is inferred from the bars (5 for FX, 2 for gold, ...).
     All times must be true UTC epochs. ``tz`` (UTC or MYT, default MYT) is only
     how the viewer displays them; ``source`` ("ftmo"/"dukascopy") records where
-    the bars came from.
+    the bars came from. ``view`` (``{from, to}`` or a pair) is the time range the
+    page opens on; without it the page opens fitted to every bar.
     """
     if not timeframes:
         raise ValueError("timeframes must not be empty")
@@ -426,6 +462,8 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
         out["source"] = str(source)
     if title is not None:
         out["title"] = str(title)
+    if view is not None:
+        out["view"] = norm_view(view)
     return out
 
 
@@ -491,6 +529,11 @@ def validate(s: dict) -> list:
             problems.append(str(exc))
     if s.get("tz") is not None and s["tz"] not in TIMEZONES:
         problems.append(f"tz must be one of {list(TIMEZONES)}, got {s['tz']!r}")
+    if s.get("view") is not None:
+        try:
+            norm_view(s["view"])
+        except (TypeError, ValueError) as exc:
+            problems.append(str(exc))
 
     eq = s.get("equity")
     if eq:
@@ -555,6 +598,8 @@ def normalize(s: dict) -> dict:
     out["precision"] = (_spec_precision(blocks) if s.get("precision") is None
                         else _check_precision(s["precision"]))
     out["tz"] = _check_tz(s.get("tz") or DEFAULT_TZ)
+    if s.get("view") is not None:
+        out["view"] = norm_view(s["view"])
     out["version"] = int(out.get("version") or SPEC_VERSION)
     out.setdefault("symbol", "Chart")
     out.setdefault("exchange", "")
