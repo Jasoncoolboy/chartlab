@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-27
+
+FTMO bars and costs from priceData only (clean years, pre-clean years opt-in and labelled, costs
+from `COST_MODELS`), a data badge on every page, overlays that stay on their price and time, and
+the fixes for the 2026-09-23 System 3 page issues.
+
 ### priceData is the one source of FTMO bars and costs (owner rule 2026-09-26; switched 2026-09-27)
 
 - **Clean years only.** Pages use priceData's `data/clean` (its verified-clean years, from
@@ -110,7 +116,8 @@ Fixes for the issues found generating 80 System 3 setup pages on 2026-09-23 (`to
 - Legacy backtest cost defaults (`CostConfig`) are now FTMO's measured XAUUSD costs: commission 0.0007 % of notional
   per side (new field `commission_pct_side`, added to the flat `commission_per_side_per_lot`), slippage $0.05 per fill,
   swap -83 / -8.3 USD per lot per night. Source: FTMO account probe 2026-09-18 and MT5 tester cost probe 2026-09-23
-  (`testEGEA/results/mt5/egbook_costprobe.csv`). The engine is still a demo.
+  (`testEGEA/results/mt5/egbook_costprobe.csv`). The engine is still a demo. *(Superseded 2026-09-27: these were
+  hand copies; `CostConfig` now reads them from priceData's `COST_MODELS`, above.)*
 - ⚠ A cost file saved before `commission_pct_side` existed gets the 0.0007 % default **added** to its flat
   commission; `CostConfig.from_json` now warns. FX files should set `commission_pct_side: 0` and
   `commission_per_side_per_lot: 2.5`.
@@ -238,7 +245,8 @@ market bars and backtest output into self-contained, offline HTML charts.
 - Readable JSON remains the default payload format; compact encoding is
   opt-in.
 
-[Unreleased]: https://github.com/Jasoncoolboy/chartlab/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Jasoncoolboy/chartlab/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Jasoncoolboy/chartlab/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Jasoncoolboy/chartlab/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Jasoncoolboy/chartlab/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Jasoncoolboy/chartlab/releases/tag/v0.1.0
