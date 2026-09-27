@@ -76,12 +76,15 @@ refused, and a frame already converted to UTC is never converted twice.
   disagree with M1, a failed priceData verification, pre-clean years on the page). Click it for the list.
 - Optional equity pane synchronised with the main chart.
 - Optional volume histogram, shown only when the spec carries a `volume` series.
-- Three drawing tools: **Hand**, **Rectangle**, **Horizontal line**.
+- Three drawing tools: **Hand**, **Rectangle**, **Horizontal line**. Zones, trades and drawings are
+  painted inside the chart's own frame, so they stay on their price and time through any zoom, pan,
+  price-axis drag or timeframe switch; a timeframe switch keeps the time window on screen.
 - Opens fitted to its bars, or on the spec's `view` (setup pages open on their own window);
   scroll to zoom, drag to pan, arrow keys to step, **Fit** / double-click for every bar.
 - Debug handle in the console: `window.ChartLab.debug()` (includes `tz`, `tzOffset`, the visible
-  range and `painted` — the trades and zones actually drawn, with their x positions);
-  `window.ChartLab.setTF("H1")` switches timeframe.
+  range, `painted` — the trades, zones and drawings actually drawn in the last frame, with their
+  positions — and `now`, where they belong under the current scales);
+  `window.ChartLab.setTF("H1")` switches timeframe; `window.ChartLab.frame()` resolves after the next paint.
 
 Commands below use `python`. On macOS/Linux use `python3`; on Windows `python3` is often
 only a Microsoft Store shim, so `python` is the safe spelling.
@@ -179,6 +182,8 @@ a short window that M1 cannot check on W1/MN is covered by that verdict. Both go
 notes. `bars="m1"` (CLI `--bars m1`) builds every timeframe from M1 instead:
 bins cut on the FTMO server clock (MT5's grid), then converted to UTC. `verify_m1=False` /
 `--no-m1-check` skips the check. `pricedata.check_vs_m1(symbol, {tf: frame})` is the check itself.
+A bar still forming when M1 ends is left out of an M1 build, as the native files leave it out
+(`pricedata.complete_until`).
 
 ### Route A — Python, in-process
 

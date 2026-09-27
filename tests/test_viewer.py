@@ -58,16 +58,25 @@ def run_page(page: Path, body: str, *, delay_ms: int = 1500, size=(1400, 800)) -
 
     ``body`` is the body of a function run ``delay_ms`` (virtual time) after the
     page loaded; it can call ``ChartLab.setTF``/``ChartLab.debug`` and must return
-    something JSON-serializable.
+    something JSON-serializable, or a Promise of it (to read the page after the
+    chart has redrawn).
     """
     html = page.read_text(encoding="utf-8")
     probe = ("<script>window.addEventListener('load',function(){setTimeout(function(){"
+             "function done(out){var d=document.createElement('pre');d.id='__chartlab_test';"
+             "d.textContent=JSON.stringify(out);document.body.appendChild(d)}"
              "var out;try{out=(function(){" + body + "})()}catch(e){out={error:String(e&&e.stack||e)}}"
-             "var d=document.createElement('pre');d.id='__chartlab_test';d.textContent=JSON.stringify(out);"
-             "document.body.appendChild(d)}," + str(delay_ms) + ")})</script></body>")
+             "Promise.resolve(out).then(done,function(e){done({error:String(e&&e.stack||e)})})"
+             "}," + str(delay_ms) + ")})</script></body>")
+    # Headless Chromium under --virtual-time-budget runs one or two animation frames after load
+    # and then none (measured 2026-09-27), while the chart library paints - and since 2026-09-27
+    # paints the overlay - in requestAnimationFrame. A 16 ms timer, which virtual time does
+    # advance, stands in for it, so the page keeps drawing frames as a real browser would.
+    raf = ("<head><script>window.requestAnimationFrame=function(cb){return setTimeout(function(){"
+           "cb(performance.now())},16)};window.cancelAnimationFrame=function(id){clearTimeout(id)};</script>")
     # The probed copy sits beside the page so a relative lib/ still resolves.
     probed = page.with_name("__probe_" + page.name)
-    probed.write_text(html.replace("</body>", probe), encoding="utf-8")
+    probed.write_text(html.replace("<head>", raf, 1).replace("</body>", probe), encoding="utf-8")
     try:
         for attempt in (1, 2):      # headless --dump-dom occasionally stalls; one retry, never a hang
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as profile:
@@ -144,10 +153,12 @@ class TestOffGridOverlays(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = run_page(_render(tmp, s), """
                 var r={m15:ChartLab.debug()};
-                ChartLab.setTF('H1');r.h1=ChartLab.debug();
-                document.getElementById('btnTrades').click();
-                r.row=document.querySelector('#drawerBody .tm').textContent;
-                return r;""")
+                ChartLab.setTF('H1');
+                return ChartLab.frame().then(function(){
+                  r.h1=ChartLab.debug();
+                  document.getElementById('btnTrades').click();
+                  r.row=document.querySelector('#drawerBody .tm').textContent;
+                  return r;});""")
         for tf in ("m15", "h1"):
             d = out[tf]
             self.assertEqual(len(d["painted"]["trades"]), 1, f"{tf}: trade not drawn")
@@ -253,6 +264,108 @@ class TestNetUnitShown(unittest.TestCase):
 
 
 @unittest.skipUnless(BROWSER, "no headless Edge/Chrome found (set CHARTLAB_BROWSER)")
+class TestOverlaysStayPut(unittest.TestCase):
+    """Zones, trades and hand drawings must stay on their time and price when the view changes.
+
+    Reported 2026-09-27: on generated setup pages a drawn zone moved away on zoom / pan and came
+    back only when drawings were reset. A pan re-scales the price axis after the time-range event
+    fires, and a price-axis change fires no event at all, so an overlay painted on its own canvas
+    in that event was left at stale coordinates. Each case below compares where the viewer painted
+    an item with where the chart's scales put it once the chart has redrawn.
+    """
+
+    PROBE = """
+        var A=ChartLab.api(),tol=1.0;
+        function settle(){return new Promise(function(r){setTimeout(r,400)})}
+        function off(d){
+          var w=[];
+          d.painted.zones.forEach(function(p){var n=d.now.zones[p.i];
+            w.push(Math.abs(p.yh-n.yh),Math.abs(p.yl-n.yl),Math.abs(p.xa-Math.max(n.xa===null?p.xa:n.xa,-1e9)))});
+          d.painted.trades.forEach(function(p){var n=d.now.trades[p.i];w.push(Math.abs(p.y-n.y),Math.abs(p.xa-n.xa))});
+          (d.painted.drawings||[]).forEach(function(p,i){var n=d.now.drawings[i];
+            w.push(Math.abs(p.ya-n.ya),Math.abs(p.yb-n.yb),Math.abs(p.xa-n.xa),Math.abs(p.xb-n.xb))});
+          return {max:w.length?Math.max.apply(null,w):null,n:w.length,zones:d.painted.zones.length,
+                  trades:d.painted.trades.length,drawings:(d.painted.drawings||[]).length};
+        }
+        var out={};
+        // a hand-drawn rectangle, made with the Rectangle tool like a user would
+        document.querySelector('[data-tool=rect]').click();
+        var cv=document.getElementById('overlay'),r=cv.getBoundingClientRect();
+        function ev(t,x,y){cv.dispatchEvent(new PointerEvent(t,{clientX:r.left+x,clientY:r.top+y,pointerId:1,bubbles:true}))}
+        ev('pointerdown',500,300);ev('pointermove',640,380);ev('pointerup',640,380);
+        return settle().then(function(){
+          out.start=off(ChartLab.debug());
+          A.chart.timeScale().setVisibleLogicalRange({from:40,to:160});           // pan + zoom
+          return settle();
+        }).then(function(){
+          out.pan=off(ChartLab.debug());
+          A.series.priceScale().applyOptions({scaleMargins:{top:0.35,bottom:0.35}}); // price axis only
+          return settle();
+        }).then(function(){
+          out.priceAxis=off(ChartLab.debug());
+          ChartLab.setTF('H1');                                                    // M15 times on H1 bars
+          A.chart.timeScale().fitContent();
+          return settle();
+        }).then(function(){
+          out.otherTf=off(ChartLab.debug());
+          return out;
+        });"""
+
+    def test_zone_trade_and_drawing_follow_pan_zoom_and_price_axis(self):
+        m15 = _walk(400, M15)                                  # rises 1 pip a bar: a pan re-scales the axis
+        h1 = _walk(100, 3600)
+        s = chart.spec("EURUSD", {"M15": m15, "H1": h1}, default_tf="M15", tz="UTC",
+                       zones=[{"start": T0 + 60 * M15, "end": T0 + 140 * M15, "low": 1.1080, "high": 1.1120,
+                               "label": "zone"}],
+                       trades=[{"dir": "long", "entryTime": T0 + 100 * M15, "entryPrice": 1.1105,
+                                "exitTime": T0 + 130 * M15, "exitPrice": 1.1130, "sl": 1.1090, "tp": 1.1140}])
+        with tempfile.TemporaryDirectory() as tmp:
+            out = run_page(_render(tmp, s), self.PROBE)
+        for step in ("start", "pan", "priceAxis", "otherTf"):
+            o = out[step]
+            self.assertGreater(o["zones"], 0, f"{step}: zone not drawn")
+            self.assertGreater(o["trades"], 0, f"{step}: trade not drawn")
+            self.assertGreater(o["drawings"], 0, f"{step}: drawing not drawn")
+            self.assertLessEqual(o["max"], 1.0, f"{step}: an overlay is {o['max']:.1f}px off its price/time")
+
+
+@unittest.skipUnless(BROWSER, "no headless Edge/Chrome found (set CHARTLAB_BROWSER)")
+class TestTimeframeSwitchKeepsTheWindow(unittest.TestCase):
+    """Switching timeframe keeps the time window on screen (it used to keep the bar NUMBERS: bars
+    40-160 of M15 became bars 40-160 of H1, a window days later)."""
+
+    def test_window_is_kept_and_a_narrow_one_is_widened(self):
+        m15, h1, h4 = _walk(800, M15), _walk(200, 3600), _walk(50, 4 * 3600)
+        s = chart.spec("EURUSD", {"M15": m15, "H1": h1, "H4": h4}, default_tf="M15", tz="UTC")
+        lo, hi = m15["time"][300], m15["time"][420]                   # a 30-hour window
+        with tempfile.TemporaryDirectory() as tmp:
+            out = run_page(_render(tmp, s), """
+                var A=ChartLab.api(),r={};
+                A.chart.timeScale().setVisibleRange({from:%d,to:%d});
+                return ChartLab.frame().then(function(){
+                  r.m15=ChartLab.debug().visible;ChartLab.setTF('H1');return ChartLab.frame();
+                }).then(function(){
+                  r.h1=ChartLab.debug().visible;ChartLab.setTF('M15');return ChartLab.frame();
+                }).then(function(){
+                  r.back=ChartLab.debug().visible;
+                  A.chart.timeScale().setVisibleRange({from:%d,to:%d});            // 2 hours
+                  return ChartLab.frame();
+                }).then(function(){ChartLab.setTF('H4');return ChartLab.frame();
+                }).then(function(){
+                  r.h4=ChartLab.debug().visible;r.h4lr=A.chart.timeScale().getVisibleLogicalRange();
+                  return r;});""" % (lo, hi, lo, lo + 7200))
+        self.assertEqual(out["m15"], {"from": lo, "to": hi})
+        self.assertLessEqual(abs(out["h1"]["from"] - lo), 3600)
+        self.assertLessEqual(abs(out["h1"]["to"] - hi), 3600)
+        self.assertLessEqual(abs(out["back"]["from"] - lo), 3600)
+        self.assertLessEqual(abs(out["back"]["to"] - hi), 3600)
+        lr = out["h4lr"]
+        self.assertGreaterEqual(lr["to"] - lr["from"], 19.5)                # widened to 20 H4 bars
+        self.assertLessEqual(out["h4"]["from"], lo)
+        self.assertGreaterEqual(out["h4"]["to"], lo + 7200 - 4 * 3600)
+
+
+@unittest.skipUnless(BROWSER, "no headless Edge/Chrome found (set CHARTLAB_BROWSER)")
 class TestDataNotesBadge(unittest.TestCase):
     """A page says what its bars are: the footer badge is amber when a note warns, and lists the notes."""
 
@@ -297,7 +410,8 @@ class TestSetupPagesOffGrid(unittest.TestCase):
             pages = setups.render_pages(m15, found, Path(tmp), lib_dir="lib",
                                         extra_frames={"H1": h1}, tz="UTC")
             out = run_page(pages[0], """
-                var r={base:ChartLab.debug()};ChartLab.setTF('H1');r.h1=ChartLab.debug();return r;""")
+                var r={base:ChartLab.debug()};ChartLab.setTF('H1');
+                return ChartLab.frame().then(function(){r.h1=ChartLab.debug();return r;});""")
         for tf in ("base", "h1"):
             self.assertEqual(len(out[tf]["painted"]["trades"]), 1, f"{tf}: trade not drawn")
             self.assertEqual(len(out[tf]["painted"]["zones"]), 1, f"{tf}: zone not drawn")

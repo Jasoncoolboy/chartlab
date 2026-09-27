@@ -37,6 +37,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (XAUUSD 2022-01 → 2026-09 in ~20 s; commission and swap totals reconcile by hand). Never quote it.
 - `rows` names `--pre-clean` when a row falls before the clean data.
 
+### Fixed (2026-09-27)
+- **Zones, trades and drawings drifted off their price and time on zoom / pan** (reported on generated
+  setup pages: "the drawn zone moved away and came back only after resetting the drawings"). They were
+  painted on a canvas over the chart, repainted on the time-range event — which fires before the price
+  axis re-scales — and never on a price-axis drag or zoom, which fires no event. They are now painted
+  inside the chart's own render pass (a series primitive, lightweight-charts 4.2 `attachPrimitive`),
+  with the scales of the frame being drawn, so they cannot drift. Measured on one probe: the old viewer
+  was 338 px off after a pan/zoom, 126 px after a price-axis change and 2,190 px after a timeframe
+  switch; the new one 0 px (`tests/test_viewer.py` `TestOverlaysStayPut`, which also draws a rectangle
+  with the Rectangle tool). The `#overlay` canvas is now only the drawing tools' input layer.
+- **A timeframe switch kept the bar numbers, not the time window** (bars 40–160 of M15 became bars
+  40–160 of H1, days later). It now opens on the bars that contain the old window, at least 20 wide.
+- **`bars="m1"` no longer shows the bar still forming** when M1 ends inside it: bins that end after
+  `pricedata.complete_until` (the latest end of any native bar — priceData's dumper writes only complete
+  bars — or the minute after the last M1 bar) are dropped. On the real data the newest M1-built bar now
+  equals the native newest bar on all 9 symbols × M5…MN; a native file with a hole at its tail does not
+  pull the cut-off back.
+
+### Added (2026-09-27)
+- `window.ChartLab.frame()` (a Promise resolved after the chart has painted the overlay again),
+  `ChartLab.api()` (`{chart, series}`), and `debug().now` (where each zone / trade / drawing belongs
+  under the current scales, to compare with `painted`, which now also lists `drawings`).
+- `tests/test_viewer.py` runs `requestAnimationFrame` on a 16 ms timer: headless Chromium under a
+  virtual-time budget stops producing animation frames after load (measured), and the chart paints in them.
+
 Fixes for the issues found generating 80 System 3 setup pages on 2026-09-23 (`todo.md`).
 
 ### Fixed

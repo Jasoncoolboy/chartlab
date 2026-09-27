@@ -197,8 +197,10 @@ df = pricedata.load_frame("EURUSD", "M15")       # UTC index: df.index.hour is a
 - For diagnostics, the page exposes `window.ChartLab.debug()` in the browser console,
   returning `{ ready, tf, bars, first, last, trades, zones, inds, stats, notes, notesWarn, drawerOpen,
   visible, view, painted: {trades, zones}, ... }` — `painted` lists what was actually drawn, so a page that renders
-  but draws nothing is visible. `window.ChartLab.setTF(tf)` switches timeframe (the headless tests
-  in `tests/test_viewer.py` drive pages this way).
+  but draws nothing is visible. Overlays are painted in the chart's own frame, so read `painted` after
+  `window.ChartLab.frame()` (a Promise) when you have just changed something; `now` gives where each
+  item belongs under the current scales. `window.ChartLab.setTF(tf)` switches timeframe and keeps the
+  time window (the headless tests in `tests/test_viewer.py` drive pages this way).
 
 ## Performance and size guidance
 

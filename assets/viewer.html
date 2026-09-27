@@ -158,7 +158,7 @@ var SPEC_URL=__SPEC_URL__;
 var candleCache={},indCalcCache={},drawerRendered=0,hoverTrade=null;
 var PAL=["#2962ff","#e91e63","#7b1fa2","#00897b","#f4511e","#c0ca33","#5e35b1","#00acc1"];
 var chart,series,volumeSeries,eqChart,eqSeries,canvas,ctx;
-var curTF=null,drawings=[],drawMode=null,drawBuf=null,dpr=1,indSeries=[];
+var curTF=null,drawings=[],drawMode=null,drawBuf=null,indSeries=[];
 var PAINTED={zones:[],trades:[]};
 function $(id){return document.getElementById(id)}
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
@@ -229,7 +229,7 @@ function switchTZ(name){
   var d=TZS[name]-OFF;
   setTZName(name);
   try{window.localStorage.setItem("chartlab.tz",name)}catch(e){}
-  setTF(curTF);
+  setTF(curTF,false);                      // the shifted window is restored just below
   if(eqSeries)eqSeries.setData(EQ);
   if(vr){try{chart.timeScale().setVisibleRange({from:vr.from+d,to:vr.to+d})}catch(e){}}
   drawerRendered=0;$("drawerBody").innerHTML="";
@@ -295,7 +295,7 @@ function init(){
       if(on)eqChart.timeScale().fitContent();
     };
   }else{$("ckEq").closest("label").style.display="none"}
-  canvas=$("overlay");ctx=canvas.getContext("2d");
+  canvas=$("overlay");                     // input layer for the drawing tools; ctx is the chart's, per frame
   buildTF();
   bindUI();
   chart.subscribeCrosshairMove(onCrosshair);
@@ -346,8 +346,24 @@ function volumeData(tf){
     color:(d.close[i]>=d.open[i])?"rgba(38,166,154,0.45)":"rgba(239,83,80,0.45)"};
   return out;
 }
-function setTF(tf){
+// A timeframe switch keeps the TIME window on screen. The chart keeps the logical (bar-number)
+// range across a data change, so bars 40-160 of M15 used to become bars 40-160 of H1: a
+// different window. The new timeframe opens on the bars containing the old window's edges,
+// at least KEEP_MIN_BARS wide; a window outside its bars falls back to showing every bar.
+var KEEP_MIN_BARS=20;
+function keepWindow(vr){
+  var a=TFS[curTF].time,n=a.length;
+  if(!n||!vr||vr.to<a[0]||vr.from>=a[n-1]+barStep(a))return false;
+  var i0=vr.from<a[0]?0:barAt(vr.from),i1=barAt(vr.to);
+  if(i1<0)i1=n-1;
+  var mid=(i0+i1)/2,half=Math.max((i1-i0)/2,KEEP_MIN_BARS/2);
+  chart.timeScale().setVisibleLogicalRange({from:mid-half,to:mid+half});
+  return true;
+}
+function setTF(tf,keep){
   if(!TFS[tf])return;
+  var vr=null;
+  if(keep!==false&&series&&curTF){try{vr=chart.timeScale().getVisibleRange()}catch(e){}}
   curTF=tf;
   var btns=$("tfBtns").children;
   for(var i=0;i<btns.length;i++)btns[i].classList.toggle("on",btns[i].textContent===tf);
@@ -359,6 +375,7 @@ function setTF(tf){
     priceFormat:priceFmt()
   });
   series.setData(candleData(tf));
+  series.attachPrimitive(new OverlayPrimitive());
   var vd=volumeData(tf);
   $("lblVol").style.display=vd?"":"none";
   if(vd){
@@ -369,6 +386,7 @@ function setTF(tf){
   }
   rebuildInds();
   defaultLegend();
+  if(vr&&!keepWindow(vr))chart.timeScale().fitContent();
   onRange();
   redraw();
 }
@@ -573,9 +591,8 @@ function syncEq(){
 var lastW=0,lastH=0,lastEW=0,lastEH=0;
 function fitCanvas(){
   var r=$("chart").getBoundingClientRect();
-  dpr=window.devicePixelRatio||1;
-  var w=Math.max(1,Math.round(r.width*dpr)),h=Math.max(1,Math.round(r.height*dpr));
-  if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
+  // #overlay is only the drawing tools' input layer now (nothing is painted on it): CSS size only.
+  if(canvas.width!==1){canvas.width=1;canvas.height=1;}
   canvas.style.width=r.width+"px";canvas.style.height=r.height+"px";
   var cw=Math.max(1,Math.round(r.width)),ch=Math.max(1,Math.round(r.height));
   if(chart&&(cw!==lastW||ch!==lastH)){lastW=cw;lastH=ch;chart.applyOptions({width:cw,height:ch});}
@@ -636,25 +653,44 @@ function yPx(v){
   }catch(e){}
   return null;
 }
-function vRange(){
-  var vr=chart.timeScale().getVisibleRange();var r=$("chart").getBoundingClientRect();
+function vRange(size){
+  var vr=chart.timeScale().getVisibleRange();
   var x0=vr?timeX(vr.from):null,x1=vr?timeX(vr.to):null;
-  if(x0===null)x0=-60;if(x1===null)x1=r.width+60;
-  return {x0:x0,x1:x1,w:r.width,h:r.height};
+  if(x0===null)x0=-60;if(x1===null)x1=size.width+60;
+  return {x0:x0,x1:x1,w:size.width,h:size.height};
 }
-function paint(zonesOn,tradesOn,extras){
-  var r=$("chart").getBoundingClientRect();
-  if(!r.width)return;
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.clearRect(0,0,r.width,r.height);
-  var v=vRange();
-  PAINTED={zones:[],trades:[]};
-  if(zonesOn)paintZones(v);
-  if(tradesOn)paintTrades(v);
-  paintD(v,drawings);
-  if(extras)paintD(v,extras);
+// Zones, trades and drawings are painted INSIDE the chart's own render pass (a series primitive),
+// with the scales of the frame being drawn. They used to live on a canvas laid over the chart and
+// repainted on the time-range event, which fires before the price axis re-scales - and a
+// price-axis drag or zoom fires no event at all - so they drifted off their price/time until
+// something forced a repaint (reported 2026-09-27; tests/test_viewer.py TestOverlaysStayPut).
+// The #overlay canvas now only catches the pointer while a drawing tool is active.
+var overlayReq=null,PREVIEW=null,frameWaiters=[];
+function OverlayPrimitive(){}
+OverlayPrimitive.prototype.attached=function(p){overlayReq=p.requestUpdate};
+OverlayPrimitive.prototype.detached=function(){overlayReq=null};
+OverlayPrimitive.prototype.updateAllViews=function(){};
+OverlayPrimitive.prototype.paneViews=function(){return OVERLAY_VIEWS};
+var OVERLAY_RENDERER={draw:function(target){
+  target.useMediaCoordinateSpace(function(scope){paintOn(scope.context,scope.mediaSize)});
+}};
+var OVERLAY_VIEWS=[{zOrder:function(){return "top"},renderer:function(){return OVERLAY_RENDERER}}];
+function paintOn(c,size){
+  ctx=c;
+  PAINTED={zones:[],trades:[],drawings:[]};
+  if(size.width&&series){
+    var v=vRange(size);
+    if($("ckZones").checked)paintZones(v);
+    if($("ckTrades").checked)paintTrades(v);
+    paintD(v,drawings,true);
+    if(PREVIEW)paintD(v,PREVIEW);
+  }
+  var w=frameWaiters;frameWaiters=[];
+  w.forEach(function(f){f()});
 }
-function redraw(){paint($("ckZones").checked,$("ckTrades").checked,null)}
+function redraw(){if(overlayReq)overlayReq()}
+// Resolves once the chart has painted the overlay again (for scripts and tests reading debug()).
+function nextFrame(){return new Promise(function(res){frameWaiters.push(res);redraw();setTimeout(res,1000)})}
 function fitText(s,w){
   if(ctx.measureText(s).width<=w)return s;
   var lo=0,hi=s.length;
@@ -682,7 +718,7 @@ function paintZones(v){
     var col=z.color||"#2962ff";
     ctx.fillStyle=hexA(col,0.12);ctx.fillRect(xa,yh,xb-xa,yl-yh);
     ctx.strokeStyle=hexA(col,0.6);ctx.lineWidth=1;ctx.strokeRect(xa+0.5,yh+0.5,xb-xa-1,yl-yh-1);
-    var pz={i:zi,xa:xa,xb:xb};
+    var pz={i:zi,xa:xa,xb:xb,yh:yh,yl:yl};
     // The label starts at the box's visible left edge and is cut to the box (full text: status bar).
     var lx=Math.max(xa,0)+6,room=xb-lx-6;
     if(z.label&&room>=24&&yl-yh>24){
@@ -736,10 +772,16 @@ function paintTrades(v){
     }
   });
 }
-function paintD(v,list){
+function drawingAt(d){
+  if(d.k==="hline"){var y=yPx(d.p);return {xa:0,xb:0,ya:y,yb:y}}
+  return {xa:timeX(d.t1),xb:(d.t2!==undefined&&d.t2!==null)?timeX(d.t2):null,
+          ya:yPx(d.p1),yb:(d.p2!==undefined&&d.p2!==null)?yPx(d.p2):null};
+}
+function paintD(v,list,record){
   list.forEach(function(d){
     var col=d.color||"#2962ff";
     ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=1.3;
+    if(record)PAINTED.drawings.push(drawingAt(d));
     if(d.k==="hline"){
       var y=yPx(d.p);
       if(y===null||y<0||y>v.h)return;
@@ -764,7 +806,7 @@ function paintD(v,list){
 }
 function setTool(name){
   drawMode=(name==="hand")?null:name;
-  drawBuf=null;
+  drawBuf=null;PREVIEW=null;
   var b=$("drawTools").children;
   for(var i=0;i<b.length;i++)b[i].classList.toggle("active",b[i].dataset.tool===name);
   canvas.classList.toggle("drawing",!!drawMode);
@@ -813,7 +855,7 @@ function bindUI(){
     var pt=evPoint(e);
     if(pt.t===null||pt.p===null)return;
     drawBuf.t2=pt.t;drawBuf.p2=pt.p;
-    paint($("ckZones").checked,$("ckTrades").checked,[drawBuf]);
+    PREVIEW=[drawBuf];redraw();
   });
   canvas.addEventListener("pointerup",function(e){
     if(!drawBuf)return;
@@ -844,6 +886,7 @@ function bindUI(){
   requestAnimationFrame(fitCanvas);
 }
 function commitPt(){
+  PREVIEW=null;
   if(!drawBuf)return;
   var d=drawBuf;
   if(d.k==="hline"){
@@ -947,7 +990,11 @@ function debug(){
   var defs=INDS[curTF]||[];
   var T=TFS[curTF].time,r=$("chart").getBoundingClientRect();
   return {
-    painted:{zones:PAINTED.zones.slice(),trades:PAINTED.trades.slice()},
+    painted:{zones:PAINTED.zones.slice(),trades:PAINTED.trades.slice(),drawings:(PAINTED.drawings||[]).slice()},
+    // where each zone / trade SHOULD be now (the chart's current scales), to compare with painted
+    now:{zones:ZONES.map(function(z){return {xa:timeX(z.start),xb:timeX(z.end),yh:yPx(z.high),yl:yPx(z.low)}}),
+         trades:TRADES.map(function(t){return {xa:timeX(t.entryTime),y:yPx(t.entryPrice)}}),
+         drawings:drawings.map(drawingAt)},
     width:r.width,firstX:T.length?timeX(T[0]):null,lastX:T.length?timeX(T[T.length-1]):null,
     view:PAY.view||null,
     ready:true,zones:ZONES.length,trades:TRADES.length,
@@ -964,7 +1011,8 @@ function debug(){
     bars:TFS[curTF].time.length,visible:vr?{from:vr.from,to:vr.to}:null
   };
 }
-window.ChartLab={debug:debug,setTF:function(tf){setTF(tf)},timeframes:function(){return Object.keys(TFS)},zonesAt:zonesAt};
+window.ChartLab={debug:debug,setTF:function(tf){setTF(tf)},timeframes:function(){return Object.keys(TFS)},zonesAt:zonesAt,
+  frame:nextFrame,api:function(){return {chart:chart,series:series}}};
 window.__chartDebug=debug;
 boot();
 })();
