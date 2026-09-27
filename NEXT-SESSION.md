@@ -2,8 +2,8 @@
 
 ## State (2026-09-27)
 
-- Only `main` exists. It is **ahead of `origin/main` and not pushed**; tags `v0.3.0` (the 2026-09-20
-  commit that set 0.3.0 — the tag was missing) and `v0.4.0` are local only. Version string `0.4.0`.
+- Only `main` exists, **pushed to `origin` with tags `v0.3.0`** (the 2026-09-20 commit that set 0.3.0 — the tag was
+  missing) **and `v0.4.0`** on 2026-09-27. Version string `0.4.0`.
 - Tests: **187 pass** (`python -m unittest discover -s tests`, ~40-60 s). `tests/test_viewer.py` runs pages in headless
   Edge (skips without a browser; `CHARTLAB_BROWSER` points at one).
 - ✅ **priceData switch done** (priceData `todo.md` project #9, `CLAUDE.md` ✅ block): clean years only by default
@@ -20,15 +20,12 @@
 
 ## To do
 
-1. **Push when you want it published:** `git push origin main --tags` (sends `main`, `v0.3.0`, `v0.4.0`).
-2. **Idea, not done — the price axis ignores overlays.** Autoscale fits the candles only, so a setup page whose zone or
-   SL/TP lies outside the candles' range hides it until the price axis is dragged. The overlay primitive could return
-   `autoscaleInfo()` (the zones/trades inside the visible time range) so they are always in view. Decide whether a page
-   should widen its axis for them.
-3. **Optional, in another project:** `scalperEngulfingSystem/tools/chart/system3_setup_pages.py` works around three things
+1. Nothing open in ChartLab itself. **Owner decisions (2026-09-27):** the price axis keeps fitting the candles only — a
+   zone or SL/TP outside their range is reached by zooming out, no auto-widening wanted; the Dukascopy path stays as it is.
+2. **Optional, in another project:** `scalperEngulfingSystem/tools/chart/system3_setup_pages.py` works around three things
    ChartLab now handles (snapping times to the bar, R written into the label instead of `net`, `page_frames` built from M1).
    It could pass exact times with `net_unit="R"` and use `bars="m1"`. That project's call.
-4. Pages built from native EURUSD/GBPUSD/USDJPY M30–D1 between 2026-09-23 and 09-26 should be rebuilt — ChartLab keeps
+3. Pages built from native EURUSD/GBPUSD/USDJPY M30–D1 between 2026-09-23 and 09-26 should be rebuilt — ChartLab keeps
    none itself (`out/` is scratch); other projects' saved pages are theirs to check (scalperEngulfingSystem's System 3
    pages were built from M1 and are not affected).
 
