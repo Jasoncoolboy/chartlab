@@ -355,6 +355,29 @@ class TestBuiltFromM1(unittest.TestCase):
             self.assertEqual(len(s["timeframes"]["H4"]["time"]), len(self.native["H4"]))
             pricedata.build_spec("EURUSD", ["H1", "H4"], root=self.root, verify_m1=False)
 
+    def test_m1_build_drops_the_bar_still_forming_as_the_native_files_do(self):
+        """M1 cut mid-session (Wed 14:36 server): the H1/H4/D1 bins it ends inside are forming, not bars. The
+        natives hold complete bars only (priceData's dumper); a native file with a hole at its tail must not
+        pull the cut-off back while M5 is whole."""
+        cut = pd.Timestamp("2026-03-11 14:37")
+        m1 = self.m1.loc[self.m1.index < cut]
+        m1.to_parquet(self.dir / "EURUSD_M1.parquet")
+        native = {}
+        for tf in ("M5", "M15", "H1", "H4", "D1"):
+            nat = pricedata.aggregate_m1(m1, tf)
+            nat = nat.loc[[pricedata.bin_end(t, tf) <= cut for t in nat.index]]    # complete bars only
+            nat["SpreadPts"] = 2
+            nat.attrs = {}
+            self._write(tf, nat)
+            native[tf] = nat
+        self.assertEqual(native["H4"].index[-1], pd.Timestamp("2026-03-11 08:00"))
+        for tf in ("M15", "H1", "H4", "D1"):
+            built = pricedata.load_frame("EURUSD", tf, root=self.root, bars="m1", clock="server")
+            self.assertTrue(built.index.equals(native[tf].index), tf)
+        self._write("H1", native["H1"].iloc[:-3])                                  # a hole at the tail
+        built = pricedata.load_frame("EURUSD", "H1", root=self.root, bars="m1", clock="server")
+        self.assertTrue(built.index.equals(native["H1"].index))
+
     def test_no_m1_file_is_unverified_never_clean(self):
         (self.dir / "EURUSD_M1.parquet").unlink()
         frames = {"H1": pricedata.load_frame("EURUSD", "H1", root=self.root)}

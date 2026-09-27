@@ -257,11 +257,42 @@ def aggregate_m1(m1: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     return out
 
 
-def _m1_build(m1_server: pd.DataFrame, tf: str, start=None, end=None, clock: str = "utc") -> pd.DataFrame:
+def bin_end(label, timeframe: str) -> pd.Timestamp:
+    """Where the bar opening at ``label`` ends, on the same clock (W1: 7 days on; MN: the next month's 1st)."""
+    tf, t = timeframe.upper(), pd.Timestamp(label)
+    if tf == "W1":
+        return t + pd.Timedelta(days=7)
+    if tf == "MN":
+        return t + pd.offsets.MonthBegin(1)
+    return t + pd.Timedelta(seconds=PERIOD_SEC[tf])
+
+
+def complete_until(symbol: str, m1_last, root: str | Path | None = None) -> pd.Timestamp:
+    """Server time up to which every bar of ``symbol`` is complete.
+
+    priceData's dumper writes only bars whose period has ended at its cutoff, so
+    the latest end of any native bar (M5..MN) is at or before that cutoff; so is
+    the minute after the last M1 bar. The later of those - a native file with a
+    hole at its tail does not pull it back while M5 is whole.
+    """
+    ends = [pd.Timestamp(m1_last) + pd.Timedelta(minutes=1)]
+    for tf in TIMEFRAMES[1:]:
+        path = parquet_path(symbol, tf, root)
+        if path.exists():
+            ix = pd.read_parquet(path, columns=[]).index
+            if len(ix):
+                ends.append(bin_end(ix[-1], tf))
+    return max(ends)
+
+
+def _m1_build(m1_server: pd.DataFrame, tf: str, start=None, end=None, clock: str = "utc",
+              until=None) -> pd.DataFrame:
     """``tf`` built from server-clock M1 for the window [start, end) in ``clock``.
 
     M1 is cut one whole bin (+3 h for the clock offset) wider than the window on
-    each side, so the bins kept are never truncated by the cut.
+    each side, so the bins kept are never truncated by the cut. ``until`` (server
+    time, see ``complete_until``) drops the bins that end after it: the bar still
+    forming when M1 ends, which a native file never holds.
     """
     pad = pd.Timedelta(days=35 if tf == "MN" else 8 if tf == "W1" else 1) + pd.Timedelta(hours=3)
     m = m1_server
@@ -272,6 +303,10 @@ def _m1_build(m1_server: pd.DataFrame, tf: str, start=None, end=None, clock: str
     if m.empty:
         return m1_server.iloc[0:0][[c for c in _AGG if c in m1_server.columns]]
     out = aggregate_m1(m, tf)
+    if until is not None and len(out):
+        attrs = out.attrs
+        out = out.loc[[bin_end(t, tf) <= until for t in out.index]]
+        out.attrs = attrs
     if clock == "utc":
         first, last = sources.ftmo_server_to_utc(pd.DatetimeIndex([out.attrs["m1_first"], out.attrs["m1_last"]]))
         conv = out.copy()
@@ -493,8 +528,8 @@ def load_frame(symbol: str, timeframe: str, *, start=None, end=None,
     file instead (Open/High/Low/Close/Volume): M1 is what priceData verifies the
     higher timeframes against, so a hole or a wrong bar in a native M5..MN file
     does not reach the page (see ``check_vs_m1``). Bins are cut on the FTMO
-    server clock, MT5's own grid, then converted; the newest bin can be partial
-    when M1 ends inside it.
+    server clock, MT5's own grid, then converted. A bin still forming when M1
+    ends is dropped, as the native files never hold one (``complete_until``).
 
     ``clock="utc"`` (default) returns a UTC-indexed frame; ``"server"`` returns
     the raw FTMO server-time labels. ``start`` inclusive / ``end`` exclusive
@@ -516,7 +551,8 @@ def load_frame(symbol: str, timeframe: str, *, start=None, end=None,
     if bars == "m1" and timeframe.upper() != "M1":
         parquet_path(symbol, timeframe, root)                     # validates the names
         m1 = load_frame(symbol, "M1", root=root, clock="server", pre_clean=pre_clean)
-        df = _m1_build(m1, timeframe.upper(), start, end, clock)
+        df = _m1_build(m1, timeframe.upper(), start, end, clock,
+                       until=complete_until(symbol, m1.index[-1], root))
         if max_bars is not None:
             df = df.iloc[-int(max_bars):]
         if df.empty:
