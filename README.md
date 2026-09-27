@@ -15,8 +15,8 @@ It comes in three layers:
    charts and per-setup pages, and turn **another system's setup rows** into pages.
    Requires `pandas`, `numpy`, `pyarrow`.
 3. **A legacy research pipeline** (`data.py`, `dukascopy.py`, `engine.py`, `strategies.py`,
-   `metrics.py`) — a Dukascopy XAUUSD backtester demo. Its cost defaults are FTMO's measured
-   XAUUSD costs, but ⛔ do not quote its numbers (see [Legacy pipeline](#legacy-pipeline)).
+   `metrics.py`) — a backtester demo on Dukascopy XAUUSD or priceData FTMO bars. Its costs are read
+   from priceData's `COST_MODELS`, but ⛔ do not quote its numbers (see [Legacy pipeline](#legacy-pipeline)).
 
 ## Time: UTC inside, Malaysian time on screen
 
@@ -71,6 +71,9 @@ refused, and a frame already converted to UTC is never converted twice.
   to the box; the full label shows in the status bar under the cursor.
 - Provider indicators (SMA / EMA / Bollinger / RSI / MACD) as toggle chips — never user-added.
 - Optional metrics panel (`stats`) and a **Trades** drawer listing every overlay trade.
+- A **data badge** in the footer (spec `notes`): what the bars are and how they were checked —
+  `✓ Data` when every note is informational, amber `⚠ Data: N warnings` when one warns (bars that
+  disagree with M1, a failed priceData verification, pre-clean years on the page). Click it for the list.
 - Optional equity pane synchronised with the main chart.
 - Optional volume histogram, shown only when the spec carries a `volume` series.
 - Three drawing tools: **Hand**, **Rectangle**, **Horizontal line**.
@@ -148,16 +151,32 @@ Lightweight-Charts build live in `assets/`; you can point elsewhere with
 
 ## Using it from another system (FTMO or Dukascopy data)
 
-**FTMO bars come from `C:\personalCode\priceData`** (`data/clean/{SYM}/{SYM}_{TF}.parquet`,
-native bars, 9 symbols × M1…MN). Override with `PRICEDATA_ROOT` or `root=`. The loader refuses
-a file that is unsorted, has duplicate stamps, NaNs, incoherent OHLC or a timezone. Frames and
-`start=`/`end=` windows you get back are **UTC**.
+**FTMO bars and FTMO costs come from `C:\personalCode\priceData` and nowhere else** (owner rule
+2026-09-26): bars from `data/clean/{SYM}/{SYM}_{TF}.parquet` (native, BID, 9 symbols × M1…MN), costs
+from its `price_data.COST_MODELS` (`pricedata.cost_model(symbol)`; evidence in priceData's
+`docs/COSTS.md`). Override the folder with `PRICEDATA_ROOT` or `root=`. The loader refuses a file that
+is unsorted, has duplicate stamps, NaNs, incoherent OHLC or a timezone. Frames and `start=`/`end=`
+windows you get back are **UTC**.
+
+**Clean years only.** `data/clean` holds only priceData's verified-clean years, from each symbol's
+`clean_from` (**2022-01-01** for all nine), and that is all a page gets. A `start` before it raises a
+`pricedata.DataWarning` saying what was left out. `pre_clean=True` (CLI `--pre-clean`) adds, **for
+context only**, the earlier years whose *prices* priceData verified clean (`pricedata.pre_clean_from`:
+EURUSD/USDJPY/USDCAD/AUDUSD/NZDUSD from 2020-01-01, GBPUSD from 2019-01-02; their spreads were
+placeholders, which a chart never uses). XAUUSD, XAGUSD and BTCUSD have none, and the repaired years
+before those dates are never loaded. A page that shows pre-clean bars says so in its data badge. Checked
+2026-09-27: those FX years match their M1 on every timeframe (M5…MN, 48 frames), and priceData's own M1
+detectors find no whole-day or whole-hour aggregate in them (they find 256 / 3,826 on the raw 2019 /
+2021 dumps). Never test or quote a number on pre-clean bars.
 
 **Native bars are checked against M1.** A native M5…MN file can miss bars that M1 has (priceData's
-2026-09-23 refresh left EURUSD/GBPUSD/USDJPY M30–D1 holes from 2026-09-21). `build_spec` compares
+2026-09-23 refresh left EURUSD/GBPUSD/USDJPY M30–D1 holes from 2026-09-21; repaired 2026-09-26). `build_spec` compares
 every native timeframe with the same bars built from M1 over the page's window and raises a
 `pricedata.DataWarning` naming what is missing or different (a frame without an M1 file is
-"NOT verified", never clean). `bars="m1"` (CLI `--bars m1`) builds every timeframe from M1 instead:
+"NOT verified", never clean). It also reads **priceData's own verdict** from its manifest
+(`pricedata.verification_status`: `htf_verified` per timeframe) and warns when it failed or is missing;
+a short window that M1 cannot check on W1/MN is covered by that verdict. Both go on the page as data
+notes. `bars="m1"` (CLI `--bars m1`) builds every timeframe from M1 instead:
 bins cut on the FTMO server clock (MT5's grid), then converted to UTC. `verify_m1=False` /
 `--no-m1-check` skips the check. `pricedata.check_vs_m1(symbol, {tf: frame})` is the check itself.
 
@@ -232,6 +251,9 @@ or in Python: `setups.setups_from_rows(rows, "M15", clock="ftmo", symbol="EURUSD
 
 With native FTMO bars, `rows` and `setup` compare every page timeframe with M1 over the bars the
 pages show and print what disagrees and how many pages show it; `--bars m1` builds the pages from M1.
+Each page's data badge carries its own verdict (priceData's, plus what the M1 check found on *that*
+page's bars), and a pre-clean label only on the pages that show pre-clean bars. A row before
+2022-01-01 is refused as outside the bars unless `--pre-clean` is given (FX only, see above).
 Times that are M1-precise (fills, zone ends) need no snapping: the page draws them at the containing bar.
 
 What this is **not**: a zone is one rectangle here. If a page must show a zone's life stages
@@ -252,17 +274,26 @@ research results.
 ## Legacy pipeline
 
 `download`, `build`, `resample`, `backtest` (and `--source dukascopy` on `chart`/`setup`)
-use a local Dukascopy XAUUSD M1 parquet under `data/parquet/` (UTC). The backtest's cost defaults
-are FTMO's measured XAUUSD costs: commission 0.0007 % of notional per side, $0.05 slippage per
-fill, swap −83 / −8.3 USD per lot per night charged at **00:00 FTMO server time** for each weekday
-that ends with the position open, ×3 for Wednesday's (Wed→Thu) rollover, none at the weekend
-(`BacktestConfig.data_clock` = `"utc"` for Dukascopy bars, `"ftmo"` for server-time bars).
-A cost file saved before `commission_pct_side` existed gets the 0.0007 % default **added** to its
-flat commission — `CostConfig.from_json` warns; FX files should set `commission_pct_side: 0` and
+use a local Dukascopy XAUUSD M1 parquet under `data/parquet/` (UTC). `backtest --source ftmo`
+runs on priceData's clean years instead (`--symbol` EURUSD, GBPUSD, AUDUSD, NZDUSD, XAUUSD or XAGUSD:
+the engine books P/L in USD with a fixed swap per night): BID bars, with the ask = BID + priceData's
+typical spread, so the spread is paid once per round trip.
+
+**Costs come from priceData's `COST_MODELS`** — `CostConfig(symbol=...)` fills every cost field left at
+`None` from it (`config.ftmo_costs`): contract size, commission per side (flat $ per lot for FX,
+percent of notional for metals, both deals), slippage per market fill (`slippage_pip_per_fill` × pip),
+and swap in USD per lot per night (swap points × point × contract). ChartLab keeps no copy of a cost
+number; the command prints the values it used. Swap is charged at **00:00 FTMO server time** for each
+weekday that ends with the position open, ×3 for Wednesday's (Wed→Thu) rollover, none at the weekend
+(`BacktestConfig.data_clock` = `"utc"` for UTC bars, `"ftmo"` for server-time bars).
+A cost file saved before `commission_pct_side` existed gets priceData's percent for its symbol **added**
+to its flat commission — `CostConfig.from_json` warns; FX files should set `commission_pct_side: 0` and
 `commission_per_side_per_lot: 2.5`. ⛔ It is still a demo: do not quote its numbers; use the
 `backtest-method` skill for costed results.
 
 ```bash
+python run.py backtest --source ftmo --symbol XAUUSD --strategy donchian --timeframe H4 --n 20 \
+  --sl-atr 2 --tp-atr 2 --lots 0.5 --no-save          # priceData bars and costs (ran 2026-09-27, ~20 s)
 python run.py download --start 2022-01-01
 python run.py build    --start 2022-01-01
 python run.py resample
@@ -295,15 +326,15 @@ chartlab/
 │   ├── test_viewer.py              # runs pages in headless Edge/Chrome: what is actually drawn
 │   └── test_engine.py              # legacy engine: swap at 00:00 FTMO server, Wed->Thu x3
 ├── sources.py          # FTMO vs Dukascopy: identification, UTC conversion, overlay clocks
-├── pricedata.py        # FTMO priceData loader (strict, UTC) + build_spec
+├── pricedata.py        # FTMO priceData loader (strict, UTC, clean years) + manifest verdict + costs + build_spec
 ├── export.py           # frames -> spec blocks (priceData / lowercase / bid_ columns)
 ├── setups.py           # setup finders, rows-from-any-system, per-setup pages + catalog
 ├── cli.py              # the `python run.py ...` entry point
-├── config.py           # dataclass configs (legacy costs, backtest, data paths)
+├── config.py           # dataclass configs (legacy costs from priceData, backtest, data paths)
 ├── dukascopy.py        # legacy: M1 tick download + bi5 decode
 ├── data.py             # legacy: parquet IO + timeframe resampling
 ├── strategies.py       # Donchian / MA-cross signal logic (vectorizable)
-├── engine.py           # legacy XAUUSD trade lifecycle + daily equity
+├── engine.py           # legacy USD-quoted trade lifecycle + daily equity
 └── metrics.py          # performance statistics
 ```
 
@@ -342,7 +373,7 @@ pandas/pyarrow; their real-data classes read the priceData folder and the packag
 library (`C:\personalCode\mtf-regime-engine-v22.4\data\library`) and skip when those are absent.
 `test_viewer.py` loads rendered pages in a headless Edge or Chrome and reads back what the viewer
 painted (`window.ChartLab.debug()`); it skips when no browser is found (`CHARTLAB_BROWSER` points
-at one). About 10 s.
+at one). About 10 s. The whole suite takes about a minute.
 
 ## Documentation
 

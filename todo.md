@@ -1,6 +1,7 @@
 # ChartLab — todo
 
-**Status 2026-09-26:** items 1–6 done; open work and caveats are in `NEXT-SESSION.md`.
+**Status 2026-09-27:** items 1–6 done, including item 3's priceData verification status; open work and caveats are in
+`NEXT-SESSION.md`.
 
 Issues found generating 80 setup pages for `C:\personalCode\scalperEngulfingSystem` (System 3) on 2026-09-23 via
 `setups.setups_from_rows` / `render_pages`. Checked with headless-Edge screenshots before and after each workaround.
@@ -42,9 +43,10 @@ whose bar is missing is not drawn (item 1). 14 of 20 EURUSD H1 System 3 pages ov
       *(2026-09-26: both. `bars="m1"` / `--bars m1`; and by default `build_spec` / `setup` / `rows` compare native bars with
       M1 over the page window (`pricedata.check_vs_m1`) and warn, naming the bars and the pages affected. Matches priceData's
       `verify_htf_vs_m1.py` count for count on the 2026-09-21 holes.)*
-- [ ] Surface priceData's verification status once its manifest records it (`priceData/todo.md` item 2).
-      **Blocked:** the manifest has `grid_verified` / `fidelity_verified` only, no HTF-vs-M1 verdict yet. ChartLab's own
-      M1 check covers the need meanwhile.
+- [x] Surface priceData's verification status once its manifest records it (`priceData/todo.md` item 2).
+      *(2026-09-27: the manifest has `htf_verified` / `htf_findings` / `verified_at` / `dirty_reason` per timeframe since
+      2026-09-26. `pricedata.verification_status` reads it; a failed or missing verdict raises a `DataWarning`, and pages
+      show it with ChartLab's own M1 check in the footer data badge, spec `notes`.)*
 
 ## 4. Opens fully zoomed out (known, pre-existing — observed on all 80 pages)
 

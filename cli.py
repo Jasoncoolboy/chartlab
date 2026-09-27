@@ -42,22 +42,51 @@ def cmd_resample(args):
         print(f"{tf}: rows={len(df)} first={df.index[0]} last={df.index[-1]}")
 
 
+def _ftmo_bid_ask(df: pd.DataFrame, spread: float) -> pd.DataFrame:
+    """priceData BID bars as the engine's bid/ask columns: ask = BID + the typical spread."""
+    out = pd.DataFrame(index=pd.DatetimeIndex(df.index).as_unit("ns"))
+    for side, add in (("bid", 0.0), ("ask", spread)):
+        for c in ("Open", "High", "Low", "Close"):
+            out[f"{side}_{c.lower()}"] = df[c].to_numpy(dtype=float) + add
+        out[f"{side}_volume"] = df["Volume"].to_numpy() if "Volume" in df.columns else 0
+    out.index.name = "time"
+    return out
+
+
 def cmd_backtest(args):
-    print("warning: legacy backtest - a Dukascopy XAUUSD demo. Cost defaults are FTMO's measured XAUUSD costs "
-          "(0.0007 %/side commission, $0.05 slippage, swap -83/-8.3 rolled at 00:00 FTMO server time, "
-          "Wed->Thu x3); do not quote its numbers - use the backtest-method rules.",
+    symbol = args.symbol.upper()
+    if args.source == "dukascopy" and symbol != "XAUUSD":
+        raise SystemExit("--source dukascopy backtests the local Dukascopy XAUUSD parquet only")
+    try:
+        cost = CostConfig.from_json(args.cost_file) if args.cost_file else CostConfig(symbol=symbol)
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}") from None
+    print(f"warning: legacy backtest demo - never quote its numbers; use the backtest-method rules. Costs "
+          f"({cost.symbol}, from priceData COST_MODELS unless --cost-file): commission "
+          f"{cost.commission_per_side_per_lot:g} $/lot + {cost.commission_pct_side:g} % of notional per side, "
+          f"slippage {cost.slippage_per_side_usd:g} per market fill, swap {cost.swap_long_per_lot_per_day:g} / "
+          f"{cost.swap_short_per_lot_per_day:g} $/lot/night at 00:00 FTMO server (Wed->Thu x3).",
           file=sys.stderr)
-    cost = CostConfig.from_json(args.cost_file) if args.cost_file else CostConfig()
-    bt = BacktestConfig(default_lots=args.lots, signal_timeframe=args.timeframe)
     tf = args.timeframe
 
-    m1 = data.load_m1_parquet(DATA / "parquet" / "XAUUSD_M1.parquet")
-    if args.m1_limit and args.m1_limit < len(m1):
-        m1 = m1.iloc[: args.m1_limit]
-
-    signal_df = pd.read_parquet(DATA / "parquet" / "tfs" / f"XAUUSD_{tf}.parquet")
-    signal_df.index = pd.DatetimeIndex(signal_df.index).as_unit("ns")
-    signal_df.index.name = "time"
+    if args.source == "ftmo":
+        # priceData's clean years, true UTC; the ask is BID + priceData's typical spread (paid once per round trip).
+        model = pricedata.cost_model(symbol, args.root)
+        spread = float(model["spread_pip"]) * float(model["pip"])
+        m1 = pricedata.load_frame(symbol, "M1", root=args.root)
+        if args.m1_limit and args.m1_limit < len(m1):
+            m1 = m1.iloc[: args.m1_limit]
+        m1 = _ftmo_bid_ask(m1, spread)
+        signal_df = _ftmo_bid_ask(pricedata.load_frame(symbol, tf, root=args.root), spread)
+        bt = BacktestConfig(default_lots=args.lots, signal_timeframe=tf, data_clock="utc")
+    else:
+        m1 = data.load_m1_parquet(DATA / "parquet" / "XAUUSD_M1.parquet")
+        if args.m1_limit and args.m1_limit < len(m1):
+            m1 = m1.iloc[: args.m1_limit]
+        signal_df = pd.read_parquet(DATA / "parquet" / "tfs" / f"XAUUSD_{tf}.parquet")
+        signal_df.index = pd.DatetimeIndex(signal_df.index).as_unit("ns")
+        signal_df.index.name = "time"
+        bt = BacktestConfig(default_lots=args.lots, signal_timeframe=tf)
     signal_df = signal_df.loc[m1.index[0]: m1.index[-1]]
 
     strat_obj = strat.make_strategy(
@@ -76,7 +105,7 @@ def cmd_backtest(args):
 
     if not args.no_save:
         OUT.mkdir(parents=True, exist_ok=True)
-        name = f"{args.strategy}_{tf}"
+        name = f"{args.strategy}_{tf}" if args.source == "dukascopy" else f"{symbol}_{args.strategy}_{tf}_ftmo"
         res.daily_equity.to_csv(OUT / f"equity_{name}.csv")
         res.trades.to_csv(OUT / f"trades_{name}.csv", index=False)
         (OUT / f"metrics_{name}.json").write_text(json.dumps(stats, indent=2))
@@ -144,6 +173,7 @@ def cmd_chart(args):
     if args.stats_file:
         stats = export.stats_block(json.loads(Path(args.stats_file).read_text()))
 
+    _pre_clean_ftmo_only(args, src)
     if src == "ftmo":
         tf = (args.timeframe or "D1").upper()
         tfs = list(dict.fromkeys([tf] + [t.upper() for t in (args.extra_tfs or [])]))
@@ -153,7 +183,8 @@ def cmd_chart(args):
                 args.symbol, tfs, default_tf=tf, start=args.start, end=args.end,
                 max_bars=args.max_bars, volume=args.volume, trades=trades, zones=zones,
                 equity=equity, clock=args.clock, indicators=args.inds, stats=stats,
-                tz=args.tz, root=args.root, bars=args.bars, verify_m1=not args.no_m1_check)
+                tz=args.tz, root=args.root, bars=args.bars, verify_m1=not args.no_m1_check,
+                pre_clean=args.pre_clean)
         for w in caught:
             if issubclass(w.category, pricedata.DataWarning):
                 print("WARNING:", w.message)
@@ -175,7 +206,7 @@ def cmd_chart(args):
             args.symbol.upper(), bars_by_tf, exchange="Dukascopy", source="dukascopy",
             period_label=f"{tf} · {args.symbol.upper()} · BID", default_tf=tf, trades=trades,
             zones=zones, equity=equity, indicators=chart.parse_indicators(args.inds),
-            stats=stats, tz=args.tz)
+            stats=stats, tz=args.tz, notes=_source_notes("dukascopy"))
     else:
         if args.extra_tfs:
             raise SystemExit("--source auto charts the one timeframe in the file; drop --extra-tfs")
@@ -186,7 +217,7 @@ def cmd_chart(args):
             exchange=sources.SOURCES[found_source]["label"], source=found_source,
             period_label=f"{tf} · {args.symbol.upper()} · BID", default_tf=tf, trades=trades,
             zones=zones, equity=equity, indicators=chart.parse_indicators(args.inds),
-            stats=stats, tz=args.tz)
+            stats=stats, tz=args.tz, notes=_source_notes(found_source, args.data))
     if args.exchange:
         page["exchange"] = args.exchange
     if args.period_label:
@@ -194,6 +225,22 @@ def cmd_chart(args):
     out = chart.render(page, OUT / "charts" / name, compact=args.compact)
     print("wrote", out)
     print("gallery", chart.gallery(OUT / "charts", title="Charts", subtitle="offline pages"))
+
+
+def _pre_clean_ftmo_only(args, src):
+    if getattr(args, "pre_clean", False) and src != "ftmo":
+        raise SystemExit("--pre-clean adds priceData's pre-clean years: it needs --source ftmo")
+
+
+def _source_notes(found: str, path=None) -> list:
+    """The data note of a page whose bars are not read from priceData."""
+    if path is not None and found == "ftmo":
+        return [{"level": "warn", "text": f"FTMO bars read from {Path(path).name}, not from priceData: not "
+                                          "verified here (FTMO pages come from priceData: --source ftmo)"}]
+    if found == "dukascopy":
+        return [{"level": "info", "text": "Dukascopy bars (true UTC): not FTMO data - an independent "
+                                          "cross-check, never the FTMO test data"}]
+    return []
 
 
 def _setup_out(name):
@@ -208,6 +255,7 @@ def _setup_out(name):
 def _load_setup_frames(args):
     """(primary UTC frame, {tf: extra UTC frame}, source name) for the chosen source."""
     src = _source(args)
+    _pre_clean_ftmo_only(args, src)
     if src == "auto":
         if args.extra_tfs:
             raise SystemExit("--source auto uses the one timeframe in the file; drop --extra-tfs")
@@ -218,11 +266,12 @@ def _load_setup_frames(args):
     others = [t.upper() for t in (args.extra_tfs or []) if t.upper() != args.timeframe]
     if src == "ftmo":
         # Full history up to --end: the finders need their warm-up bars; --start
-        # only filters which setups are kept. Everything is UTC.
+        # only filters which setups are kept. Everything is UTC. Clean years only,
+        # unless --pre-clean adds the price-verified ones before them.
         df = pricedata.load_frame(args.symbol, args.timeframe, end=args.end or None, root=args.root,
-                                  bars=args.bars)
+                                  bars=args.bars, pre_clean=args.pre_clean)
         extra = {t: pricedata.load_frame(args.symbol, t, end=args.end or None, root=args.root,
-                                         bars=args.bars)
+                                         bars=args.bars, pre_clean=args.pre_clean)
                  for t in others}
         return df, extra, "ftmo"
     df = data.load_bars(args.data, tf=args.timeframe, start=args.start or None, end=args.end or None)
@@ -232,25 +281,42 @@ def _load_setup_frames(args):
     return df, extra, "dukascopy"
 
 
-def _check_pages(args, df, extra_frames, found, src) -> list:
-    """Native FTMO bars: compare every timeframe of the pages with M1 over the bars the
-    pages show, and print what disagrees and how many pages show it. Returns the lines."""
-    if src != "ftmo" or args.bars != "native" or args.no_m1_check or not found:
-        return []
+def _check_pages(args, df, extra_frames, found, src) -> tuple:
+    """Data notes of setup pages: ``(notes for every page, {setup id: notes})``.
+
+    FTMO bars from priceData: priceData's own verdict per timeframe, ChartLab's
+    comparison of native bars with M1 over the bars the pages show (what disagrees
+    and how many pages show it is also printed), and a label on each page that
+    shows pre-clean bars. Bars from a file: one note naming what they are.
+    """
+    if src != "ftmo" or _source(args) == "auto":
+        return _source_notes(src, args.data if _source(args) == "auto" else None), {}
+    if not found:
+        return [], {}
+    sym = args.symbol.upper()
     wins = setups.page_windows(df, found, args.pre, args.post, extra_frames)
     frames = {args.timeframe: df, **extra_frames}
-    lines, bad = [], {}
+    status = pricedata.verification_status(sym, list(frames), args.root) if args.bars == "native" else {}
+    lines = pricedata.describe_verification(sym, status)
+    check = args.bars == "native" and not args.no_m1_check
+    bad, open_lines, compared = {}, {}, set()
     for tf, frame in frames.items():
         spans = [w[tf] for w in wins if tf in w]
-        if tf == "M1" or not spans:
+        if not check or tf == "M1" or not spans:
             continue
         step = pd.Timedelta(seconds=sources.spacing_seconds(frame.index) or 60)
-        res = pricedata.check_vs_m1(args.symbol, {tf: frame}, start=min(a for a, _ in spans),
+        res = pricedata.check_vs_m1(sym, {tf: frame}, start=min(a for a, _ in spans),
                                     end=max(b for _, b in spans) + step, root=args.root)
-        lines += pricedata.describe_check(args.symbol, res)
-        r = res[tf]
-        if r["status"] == "dirty":
+        if res[tf]["status"] != "unverified":
+            compared.add(tf)
+        res = pricedata.covered_by_pricedata(res, status)
+        found_lines = pricedata.describe_check(sym, res)
+        lines += found_lines
+        r = res.get(tf)
+        if r and r["status"] == "dirty":
             bad[tf] = r["missing"].union(r["mismatched"]).union(r["extra"])
+        elif found_lines:
+            open_lines[tf] = found_lines
     for line in lines:
         print("WARNING:", line)
     if bad:
@@ -258,7 +324,22 @@ def _check_pages(args, df, extra_frames, found, src) -> list:
                                          for tf, t in bad.items() if tf in w))
         print(f"WARNING: {hit} of {len(found)} pages show those bars; --bars m1 builds every "
               "timeframe from M1 instead")
-    return lines
+    until = {tf: f.attrs.get("pre_clean_until") for tf, f in frames.items()}
+    per_page = {}
+    for s, w in zip(found, wins):
+        page_lines = []
+        for tf, t in bad.items():
+            hits = t[(t >= w[tf][0]) & (t <= w[tf][1])] if tf in w else t[:0]
+            if len(hits):
+                page_lines.append(f"{sym} {tf}: {len(hits)} native bar(s) on this page disagree with M1 "
+                                  f"(first {hits[0]:%Y-%m-%d %H:%M} UTC)")
+        page_lines += [line for tf, ls in open_lines.items() if tf in w for line in ls]
+        pre = [until[tf] for tf in w if until.get(tf) is not None and w[tf][0] < until[tf]]
+        per_page[s.id] = pricedata.page_notes(
+            sym, list(w), bars=args.bars, status={tf: status[tf] for tf in w if tf in status},
+            check_lines=page_lines, checked=[tf for tf in w if tf in compared],
+            pre_clean_until=max(pre) if pre else None)
+    return [], per_page
 
 
 def cmd_setup(args):
@@ -287,11 +368,12 @@ def cmd_setup(args):
         extra.append(f"{args.start or '...'}→{args.end or '...'} UTC")
     label = pstr + ((" · " + " · ".join(extra)) if extra else "")
 
-    _check_pages(args, df, extra_frames, found, src)
+    notes, page_notes = _check_pages(args, df, extra_frames, found, src)
     out_dir, lib_dir = _setup_out(args.out or "setups")
     pages = setups.render_pages(df, found, out_dir, pre=args.pre, post=args.post,
                                 lib_dir=lib_dir, symbol=args.symbol.upper(),
-                                extra_frames=extra_frames, source=src, tz=args.tz)
+                                extra_frames=extra_frames, source=src, tz=args.tz,
+                                notes=notes, page_notes=page_notes)
     cfg = {"label": label, "tf": args.timeframe, "kind": args.kind, "params": params,
            "dir": args.dir, "limit": args.limit, "start": args.start, "end": args.end,
            "tz": args.tz}
@@ -316,11 +398,20 @@ def cmd_rows(args):
     args.start = None
     df, extra_frames, src = _load_setup_frames(args)
     found = setups.setups_from_rows(rows, args.timeframe, clock=args.clock, symbol=args.symbol.upper())
-    _check_pages(args, df, extra_frames, found, src)
+    try:
+        notes, page_notes = _check_pages(args, df, extra_frames, found, src)
+    except ValueError as exc:
+        if src == "ftmo" and "is outside the" in str(exc) and not args.pre_clean:
+            cf = pricedata.clean_from(args.symbol, args.root)
+            raise ValueError(f"{exc} FTMO bars start at priceData's clean data"
+                             + (f" ({cf:%Y-%m-%d} server)" if cf is not None else "")
+                             + "; --pre-clean adds the price-verified years before it, for context") from None
+        raise
     out_dir, lib_dir = _setup_out(args.out)
     pages = setups.render_pages(df, found, out_dir, pre=args.pre, post=args.post,
                                 lib_dir=lib_dir, symbol=args.symbol.upper(),
-                                extra_frames=extra_frames, source=src, tz=args.tz)
+                                extra_frames=extra_frames, source=src, tz=args.tz,
+                                notes=notes, page_notes=page_notes)
     index = setups.write_catalog(out_dir, found, {
         "label": args.label, "tf": args.timeframe, "kind": "external", "tz": args.tz})
     print(f"{len(found)} setups -> {len(pages)} pages")
@@ -346,7 +437,14 @@ def main(argv=None):
     p = sub.add_parser("resample", help="resample M1 into higher timeframes")
     p.set_defaults(func=cmd_resample)
 
-    p = sub.add_parser("backtest", help="legacy backtest demo: Dukascopy XAUUSD only, never quote its numbers")
+    p = sub.add_parser("backtest", help="legacy backtest demo (never quote its numbers): Dukascopy XAUUSD, "
+                                        "or FTMO bars from priceData")
+    p.add_argument("--source", choices=["dukascopy", "ftmo"], default="dukascopy",
+                   help="dukascopy = the local Dukascopy XAUUSD parquet (bid/ask); ftmo = priceData's clean "
+                        "years (BID, ask = BID + priceData's spread)")
+    p.add_argument("--symbol", default="XAUUSD",
+                   help="--source ftmo: EURUSD, GBPUSD, AUDUSD, NZDUSD, XAUUSD or XAGUSD")
+    p.add_argument("--root", default=None, help="priceData root")
     p.add_argument("--strategy", default="donchian", choices=["donchian", "macross"])
     p.add_argument("--timeframe", default="D1")
     p.add_argument("--n", type=int, default=20)
@@ -371,6 +469,9 @@ def main(argv=None):
                  "timeframe from the M1 file (use it when the native files have holes)")
     check_help = ("--source ftmo, native bars: skip comparing the page's bars with the same bars built "
                   "from M1 (on by default: a hole or a wrong native bar is reported)")
+    pre_clean_help = ("--source ftmo: also show the years before priceData's clean data whose PRICES are "
+                      "verified (FX 2020-21, GBPUSD from 2019; spreads were placeholders) - context "
+                      "only, labelled on the page. Default: clean years only (from 2022-01-01)")
     p = sub.add_parser("chart", help="render an HTML page from priceData (or legacy parquet) + overlays")
     p.add_argument("--source", choices=src_choices, default="ftmo", help=src_help)
     p.add_argument("--assume", choices=["ftmo", "dukascopy"], default=None,
@@ -400,6 +501,7 @@ def main(argv=None):
     p.add_argument("--name", default=None)
     p.add_argument("--bars", choices=list(pricedata.BARS), default="native", help=bars_help)
     p.add_argument("--no-m1-check", action="store_true", help=check_help)
+    p.add_argument("--pre-clean", action="store_true", help=pre_clean_help)
     p.set_defaults(func=cmd_chart)
 
     p = sub.add_parser("setup", help="generate a setup catalog + annotated pages (built-in Donchian / MA-cross finders)")
@@ -427,6 +529,7 @@ def main(argv=None):
     p.add_argument("--out", default=None)
     p.add_argument("--bars", choices=list(pricedata.BARS), default="native", help=bars_help)
     p.add_argument("--no-m1-check", action="store_true", help=check_help)
+    p.add_argument("--pre-clean", action="store_true", help=pre_clean_help)
     p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("rows", help="setup pages from another system's rows (JSON file)")
@@ -449,6 +552,7 @@ def main(argv=None):
     p.add_argument("--out", required=True, help="folder name under out/charts, or an absolute folder")
     p.add_argument("--bars", choices=list(pricedata.BARS), default="native", help=bars_help)
     p.add_argument("--no-m1-check", action="store_true", help=check_help)
+    p.add_argument("--pre-clean", action="store_true", help=pre_clean_help)
     p.set_defaults(func=cmd_rows)
 
     args = parser.parse_args(argv)

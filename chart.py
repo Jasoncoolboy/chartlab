@@ -290,6 +290,35 @@ def stats_from_rows(rows) -> list:
     return [_norm_stat(r) for r in rows]
 
 
+NOTE_LEVELS = ("info", "warn")
+
+
+def _norm_note(note) -> dict:
+    if isinstance(note, str):
+        note = {"text": note}
+    if not isinstance(note, dict):
+        raise ValueError(f"a note is text or {{'level', 'text'}}, got {note!r}")
+    text = str(note.get("text") or "").strip()
+    if not text:
+        raise ValueError(f"note has no text: {note!r}")
+    level = str(note.get("level") or "info").lower()
+    level = "warn" if level == "warning" else level
+    if level not in NOTE_LEVELS:
+        raise ValueError(f"note level must be one of {list(NOTE_LEVELS)}, got {note.get('level')!r}")
+    return {"level": level, "text": text}
+
+
+def notes_from_rows(rows) -> list:
+    """Data notes shown in the page footer: text, or ``{level: info|warn, text}`` each.
+
+    They say what the bars are and how they were checked (e.g. "verified against
+    M1", "pre-clean years before 2022-01-01"); any ``warn`` note turns the badge amber.
+    """
+    if isinstance(rows, (str, dict)):
+        rows = [rows]
+    return [_norm_note(n) for n in rows]
+
+
 # --------------------------------------------------------------------------
 # compact (base64) payload encoding — opt-in, ~3x smaller than readable JSON
 # --------------------------------------------------------------------------
@@ -405,7 +434,7 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
          default_tf: str | None = None, trades=None, zones=None, equity=None,
          indicators=None, stats=None, title: str | None = None,
          precision: int | None = None, source: str | None = None,
-         tz: str | None = None, view=None) -> dict:
+         tz: str | None = None, view=None, notes=None) -> dict:
     """Assemble and validate a chart spec from flexible inputs.
 
     ``precision`` is the number of price decimals the viewer shows; when
@@ -413,7 +442,8 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
     All times must be true UTC epochs. ``tz`` (UTC or MYT, default MYT) is only
     how the viewer displays them; ``source`` ("ftmo"/"dukascopy") records where
     the bars came from. ``view`` (``{from, to}`` or a pair) is the time range the
-    page opens on; without it the page opens fitted to every bar.
+    page opens on; without it the page opens fitted to every bar. ``notes`` are
+    data notes for the footer badge (see ``notes_from_rows``).
     """
     if not timeframes:
         raise ValueError("timeframes must not be empty")
@@ -464,6 +494,8 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
         out["title"] = str(title)
     if view is not None:
         out["view"] = norm_view(view)
+    if notes:
+        out["notes"] = notes_from_rows(notes)
     return out
 
 
@@ -534,6 +566,11 @@ def validate(s: dict) -> list:
             norm_view(s["view"])
         except (TypeError, ValueError) as exc:
             problems.append(str(exc))
+    if s.get("notes") is not None:
+        try:
+            notes_from_rows(s["notes"])
+        except (TypeError, ValueError) as exc:
+            problems.append(str(exc))
 
     eq = s.get("equity")
     if eq:
@@ -600,6 +637,8 @@ def normalize(s: dict) -> dict:
     out["tz"] = _check_tz(s.get("tz") or DEFAULT_TZ)
     if s.get("view") is not None:
         out["view"] = norm_view(s["view"])
+    if s.get("notes"):
+        out["notes"] = notes_from_rows(s["notes"])
     out["version"] = int(out.get("version") or SPEC_VERSION)
     out.setdefault("symbol", "Chart")
     out.setdefault("exchange", "")

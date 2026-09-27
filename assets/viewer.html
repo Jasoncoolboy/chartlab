@@ -74,6 +74,14 @@ footer.st b{color:var(--text);font-weight:500}
 #drawerBody .tr .nt{font-variant-numeric:tabular-nums;flex:0 0 auto}
 #drawerBody .tr .nt.up{color:var(--up)}#drawerBody .tr .nt.down{color:var(--down)}
 #drawerBody .more,#drawerBody .empty{padding:10px;color:var(--muted)}
+#stNotes{cursor:pointer;padding:0 8px;border-radius:9px;border:1px solid var(--border);line-height:17px}
+#stNotes.ok{color:var(--up)}
+#stNotes.warn{color:#f5a623;border-color:rgba(245,166,35,.55)}
+#notesPanel{position:absolute;right:10px;bottom:8px;z-index:8;max-width:min(620px,90%);background:rgba(19,23,34,.97);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:11px;line-height:1.5}
+#notesPanel.hide{display:none}
+#notesPanel .n{display:flex;gap:7px;padding:2px 0}
+#notesPanel .n i{font-style:normal;flex:0 0 auto}
+#notesPanel .n.warn i{color:#f5a623}#notesPanel .n.info i{color:var(--up)}
 @media print{body{overflow:visible}header.tb,footer.st,#drawer{display:none!important}#app{height:auto}#chartWrap{height:80vh}}
 </style>
 </head>
@@ -125,6 +133,7 @@ footer.st b{color:var(--text);font-weight:500}
     <div class="dh"><span id="drawerTitle">Trades</span><span class="flex"></span><button class="dx" id="drawerClose">&times;</button></div>
     <div id="drawerBody"></div>
   </div>
+  <div id="notesPanel" class="hide"></div>
 </div>
 <div id="eqWrap" class="hide">
   <div id="eqTitle">Equity curve</div>
@@ -134,6 +143,7 @@ footer.st b{color:var(--text);font-weight:500}
   <span>Bar: <b id="stT">—</b> <b id="stP">—</b></span>
   <span id="stD">—</span>
   <span class="flex"></span>
+  <span id="stNotes" style="display:none" title="Data notes"></span>
   <span id="stFt">offline</span>
 </footer>
 </div>
@@ -142,7 +152,7 @@ footer.st b{color:var(--text);font-weight:500}
 <script>
 (function(){
 "use strict";
-var PAY={},SYM="Chart",TFS={},TRADES=[],ZONES=[],EQ=null,INDS={},STATS=[],defTF="D1",PREC=2;
+var PAY={},SYM="Chart",TFS={},TRADES=[],ZONES=[],EQ=null,INDS={},STATS=[],NOTES=[],defTF="D1",PREC=2;
 var TZS={"UTC":0,"MYT":28800},TZLABEL={"UTC":"UTC","MYT":"MYT (UTC+8)"},TZNAME="UTC",OFF=0;
 var SPEC_URL=__SPEC_URL__;
 var candleCache={},indCalcCache={},drawerRendered=0,hoverTrade=null;
@@ -235,6 +245,7 @@ function usePayload(p){
   EQ=(PAY.equity&&PAY.equity.time&&PAY.equity.time.length)?PAY.equity.time.map(function(tt,i){return {time:tt,value:PAY.equity.value[i]}}):null;
   INDS=PAY.indicators||{};
   STATS=PAY.stats||[];
+  NOTES=(PAY.notes||[]).filter(function(n){return n&&n.text});
   defTF=PAY.defaultTimeframe||Object.keys(TFS)[0]||"D1";
   PREC=(typeof PAY.precision==="number"&&PAY.precision>=0&&PAY.precision<=8)?Math.floor(PAY.precision):inferPrec();
   candleCache={};indCalcCache={};drawerRendered=0;hoverTrade=null;
@@ -271,6 +282,7 @@ function init(){
   paintTZ();
   $("lblStats").style.display=STATS.length?"":"none";
   renderStats();
+  renderNotes();
   $("btnTrades").style.display=TRADES.length?"":"none";
   if(EQ){
     eqChart=LightweightCharts.createChart($("eqC"),{autoSize:false,layout:{background:{type:"solid",color:"#0e1117"},textColor:"#787b86",fontSize:10},grid:{vertLines:{visible:false},horzLines:{color:"#1e222d"}},rightPriceScale:{borderColor:"#2a2e39"},timeScale:{visible:false},crosshair:{mode:0}});
@@ -486,6 +498,22 @@ function renderStats(){
     h+="<div class='r'><span class='k'>"+esc(s.label)+"</span><span class='v "+(tone||"")+"'>"+esc(s.value)+"</span></div>";
   });
   el.innerHTML=h;
+}
+// Data notes (spec "notes"): what the bars are and how they were checked. The footer badge is
+// amber when any note is a warning; clicking it lists them.
+function notesWarn(){return NOTES.filter(function(n){return n.level==="warn"}).length}
+function renderNotes(){
+  var b=$("stNotes");
+  if(!NOTES.length){b.style.display="none";return}
+  var w=notesWarn();
+  b.style.display="";
+  b.className=w?"warn":"ok";
+  b.textContent=w?("⚠ Data: "+w+" warning"+(w>1?"s":"")):"✓ Data";
+  b.title=NOTES.map(function(n){return (n.level==="warn"?"⚠ ":"✓ ")+n.text}).join("\n");
+  $("notesPanel").innerHTML=NOTES.map(function(n){
+    var lv=n.level==="warn"?"warn":"info";
+    return "<div class='n "+lv+"'><i>"+(lv==="warn"?"⚠":"✓")+"</i><span>"+esc(n.text)+"</span></div>";
+  }).join("");
 }
 function applyRange(r){
   if(!curTF)return;
@@ -752,6 +780,8 @@ function bindUI(){
   $("ckVol").onchange=function(){if(volumeSeries)volumeSeries.applyOptions({visible:$("ckVol").checked})};
   $("ckStats").onchange=renderStats;
   $("btnTrades").onclick=function(){toggleDrawer()};
+  $("stNotes").onclick=function(){$("notesPanel").classList.toggle("hide")};
+  $("notesPanel").onclick=function(){$("notesPanel").classList.add("hide")};
   $("drawerClose").onclick=function(){toggleDrawer(false)};
   var body=$("drawerBody");
   body.addEventListener("mouseover",function(e){var r=rowFrom(e.target);if(r)setHover(+r.dataset.i)});
@@ -928,6 +958,7 @@ function debug(){
     volume:!!volumeSeries,volumeOn:volumeSeries?$("ckVol").checked:false,
     eqOn:!$("eqWrap").classList.contains("hide"),
     stats:STATS.length,statsOn:!$("stats").classList.contains("hide"),
+    notes:NOTES.length,notesWarn:notesWarn(),notesBadge:$("stNotes").style.display==="none"?null:$("stNotes").textContent,
     drawerOpen:!$("drawer").classList.contains("hide"),drawerRows:drawerRendered,
     tf:curTF,tz:TZNAME,tzOffset:OFF,precision:PREC,first:TFS[curTF].time[0],last:TFS[curTF].time[TFS[curTF].time.length-1],
     bars:TFS[curTF].time.length,visible:vr?{from:vr.from,to:vr.to}:null

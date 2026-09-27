@@ -498,6 +498,34 @@ class TestNetUnit(unittest.TestCase):
         self.assertEqual(html.count('"$"+Math.abs'), 0)          # no hard-coded dollar formatting left
 
 
+class TestDataNotes(unittest.TestCase):
+    """Data notes: what the bars are and how they were checked, shown in the page footer."""
+
+    def test_notes_are_normalized_and_travel_in_the_spec(self):
+        self.assertEqual(chart.notes_from_rows("verified"), [{"level": "info", "text": "verified"}])
+        self.assertEqual(chart.notes_from_rows([{"level": "WARNING", "text": " pre-clean "}]),
+                         [{"level": "warn", "text": "pre-clean"}])
+        s = chart.spec("EURUSD", {"D1": _bars()}, notes=["ok", {"level": "warn", "text": "careful"}])
+        self.assertEqual([n["level"] for n in s["notes"]], ["info", "warn"])
+        self.assertEqual(chart.validate(s), [])
+        self.assertNotIn("notes", chart.spec("EURUSD", {"D1": _bars()}))
+        self.assertEqual(chart.normalize({"timeframes": {"D1": _bars()}, "notes": "x"})["notes"],
+                         [{"level": "info", "text": "x"}])
+
+    def test_bad_notes_are_refused(self):
+        for bad in ([{"level": "error", "text": "x"}], [{"level": "info"}], [42]):
+            with self.assertRaises(ValueError):
+                chart.notes_from_rows(bad)
+            s = chart.spec("EURUSD", {"D1": _bars()})
+            s["notes"] = bad
+            self.assertTrue(chart.validate(s), bad)
+
+    def test_viewer_shows_a_footer_badge(self):
+        html = (Path(chart.__file__).parent / "assets" / "viewer.html").read_text(encoding="utf-8")
+        for needle in ('id="stNotes"', 'id="notesPanel"', "function renderNotes", "notesWarn:"):
+            self.assertIn(needle, html)
+
+
 class TestLoader(unittest.TestCase):
     def test_render_loader_embeds_url(self):
         with tempfile.TemporaryDirectory() as tmp:

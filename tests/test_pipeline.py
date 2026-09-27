@@ -225,6 +225,22 @@ class TestPriceDataAdapter(unittest.TestCase):
         self.assertEqual(vals, self.m15["Close"].tolist())
 
 
+def write_manifest(root, symbol="EURUSD", *, clean_from=None, price_clean_from=None, years=None,
+                   verified=None, findings=None):
+    """A priceData ``data/clean/manifest.json`` with only the fields ChartLab reads.
+
+    ``verified`` = {tf: True | False}: priceData's own HTF-vs-M1 verdict per timeframe.
+    """
+    tfs = {tf: {"htf_verified": v, "htf_findings": (findings or {}).get(tf, {}),
+                "verified_at": "2026-09-26T13:29:01", "dirty_reason": None}
+           for tf, v in (verified or {}).items()}
+    info = {"symbol": symbol, "clean_from": clean_from, "price_clean_from": price_clean_from,
+            "quality_by_year": years or {}, "timeframes": tfs}
+    path = Path(root) / "data" / "clean" / "manifest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"symbols": {symbol: info}}), encoding="utf-8")
+
+
 def make_m1_server(start="2026-03-04", days=9, seed=5):
     """FX-like M1 in FTMO SERVER time: Mon-Fri 00:05-23:55, across the US DST switch
     (2026-03-08) so the UTC conversion changes offset inside the data."""
@@ -258,6 +274,7 @@ class TestBuiltFromM1(unittest.TestCase):
             nat.attrs = {}
             nat.to_parquet(self.dir / f"EURUSD_{tf}.parquet")
             self.native[tf] = nat
+        write_manifest(self.root, verified=dict.fromkeys(self.native, True))   # as priceData records it
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -347,6 +364,162 @@ class TestBuiltFromM1(unittest.TestCase):
             pricedata.build_spec("EURUSD", ["H1"], root=self.root)
 
 
+@unittest.skipIf(pd is None or not HAVE_PARQUET, "pandas/pyarrow not installed")
+class TestCleanYearsOnly(unittest.TestCase):
+    """priceData's clean years only by default; pre-clean years only on request, only where their prices are
+    verified, and labelled. The fake priceData splits at 2026-01-01 like the real one splits at 2022-01-01:
+    2025-12-29 is a repaired (not price-clean) day, 2025-12-30/31 are price-clean pre-clean days."""
+
+    CUT = pd.Timestamp("2026-01-01") if pd is not None else None
+    TFS = ("M15", "H1", "H4", "D1")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.m1 = make_m1_server(start="2025-12-29", days=12)
+        frames = {"M1": self.m1, **{tf: pricedata.aggregate_m1(self.m1, tf) for tf in self.TFS}}
+        for tf, f in frames.items():
+            f = f.copy()
+            f["SpreadPts"] = 2
+            f.attrs = {}
+            for part, keep in (("clean", f.index >= self.CUT), ("pre_clean", f.index < self.CUT)):
+                d = self.root / "data" / part / "EURUSD"
+                d.mkdir(parents=True, exist_ok=True)
+                f.loc[keep].to_parquet(d / f"EURUSD_{tf}.parquet")
+        self.full = frames
+        self.manifest(years={"2025": {"price_clean": True}})
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def manifest(self, years, verified=None, findings=None):
+        write_manifest(self.root, clean_from="2026-01-01", price_clean_from="2025-12-30", years=years,
+                       verified=verified or dict.fromkeys(self.TFS, True), findings=findings)
+
+    def load(self, tf, **kw):
+        import warnings as _w
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always", pricedata.DataWarning)
+            df = pricedata.load_frame("EURUSD", tf, root=self.root, **kw)
+        return df, [str(w.message) for w in caught if issubclass(w.category, pricedata.DataWarning)]
+
+    def test_clean_from_and_pre_clean_from_come_from_the_manifest(self):
+        self.assertEqual(pricedata.clean_from("EURUSD", self.root), self.CUT)
+        self.assertEqual(pricedata.pre_clean_from("EURUSD", self.root), pd.Timestamp("2025-12-30"))
+        self.manifest(years={"2025": {"price_clean": False}})         # a year whose prices are not verified
+        self.assertIsNone(pricedata.pre_clean_from("EURUSD", self.root))
+        (self.root / "data" / "clean" / "manifest.json").unlink()
+        self.assertIsNone(pricedata.clean_from("EURUSD", self.root))
+        self.assertIsNone(pricedata.pre_clean_from("EURUSD", self.root))
+
+    def test_default_is_clean_years_only_and_an_early_start_says_so(self):
+        cut_utc = pricedata.server_to_utc(self.CUT)
+        df, warned = self.load("H1")
+        self.assertGreaterEqual(df.index[0], cut_utc)
+        self.assertEqual(warned, [])
+        self.assertNotIn("pre_clean_rows", df.attrs)
+        df, warned = self.load("H1", start="2025-12-29")
+        self.assertGreaterEqual(df.index[0], cut_utc)
+        (msg,) = warned
+        self.assertIn("starts 2026-01-01", msg)
+        self.assertIn("pre_clean=True", msg)
+        self.assertIn("2025-12-30", msg)
+
+    def test_pre_clean_adds_only_the_price_verified_days_and_tags_them(self):
+        pcf = pricedata.server_to_utc(pd.Timestamp("2025-12-30"))
+        cut_utc = pricedata.server_to_utc(self.CUT)
+        for bars in ("native", "m1"):
+            df, warned = self.load("H1", pre_clean=True, bars=bars)
+            self.assertEqual(warned, [], bars)
+            self.assertGreaterEqual(df.index[0], pcf, bars)                   # never the repaired 2025-12-29
+            self.assertLess(df.index[0], cut_utc, bars)
+            self.assertEqual(df.attrs["pre_clean_rows"], int((df.index < cut_utc).sum()), bars)
+            self.assertEqual(df.attrs["pre_clean_until"], cut_utc, bars)
+            want = sources.ftmo_server_to_utc(self.full["H1"].index[self.full["H1"].index >= "2025-12-30"])
+            self.assertTrue(df.index.equals(pd.DatetimeIndex(want)), bars)
+        df, warned = self.load("H1", pre_clean=True, start="2025-12-29")
+        self.assertIn("nothing before 2025-12-30", warned[0])
+        df, _ = self.load("H1", pre_clean=True, start="2026-01-05")         # a window after the cut
+        self.assertNotIn("pre_clean_rows", df.attrs)
+        self.manifest(years={"2025": {"price_clean": False}})
+        df, warned = self.load("H1", pre_clean=True, start="2025-12-29")
+        self.assertGreaterEqual(df.index[0], cut_utc)
+        self.assertIn("no price-verified years", warned[0])
+
+    def test_pre_clean_bars_are_checked_against_pre_clean_m1(self):
+        frames = {tf: self.load(tf, pre_clean=True)[0] for tf in self.TFS}
+        res = pricedata.check_vs_m1("EURUSD", frames, root=self.root)
+        self.assertEqual({tf: r["status"] for tf, r in res.items()}, dict.fromkeys(self.TFS, "clean"))
+        cut_utc = pricedata.server_to_utc(self.CUT)
+        holed = frames["H1"].drop(frames["H1"].index[[3, 4]])                 # holes inside the pre-clean days
+        self.assertLess(holed.index[5], cut_utc)
+        r = pricedata.check_vs_m1("EURUSD", {"H1": holed}, root=self.root)["H1"]
+        self.assertEqual(list(r["missing"]), list(frames["H1"].index[[3, 4]]))
+
+    def test_page_notes_say_what_the_bars_are(self):
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("error", pricedata.DataWarning)
+            clean = pricedata.build_spec("EURUSD", ["H1", "H4"], root=self.root)
+            pre = pricedata.build_spec("EURUSD", ["H1", "H4"], root=self.root, pre_clean=True)
+            m1 = pricedata.build_spec("EURUSD", ["H1", "H4"], root=self.root, bars="m1")
+        self.assertEqual([n["level"] for n in clean["notes"]], ["info"])
+        self.assertIn("priceData verified these native bars against M1 (2026-09-26 13:29)", clean["notes"][0]["text"])
+        self.assertIn("ChartLab re-checked", clean["notes"][0]["text"])
+        self.assertEqual([n["level"] for n in pre["notes"]], ["warn", "info"])
+        self.assertIn("PRE-CLEAN", pre["notes"][0]["text"])
+        self.assertIn(f"{pricedata.server_to_utc(self.CUT):%Y-%m-%d %H:%M} UTC", pre["notes"][0]["text"])
+        self.assertEqual(m1["notes"], [{"level": "info", "text": "EURUSD H1, H4: every timeframe built from priceData M1"}])
+        self.assertEqual(chart.validate(pre), [])
+
+    def test_a_failed_pricedata_verdict_warns_and_is_on_the_page(self):
+        self.manifest(years={"2025": {"price_clean": True}}, verified={"H1": True, "H4": False},
+                      findings={"H4": {"missing": 2, "mismatch": 0}})
+        with self.assertWarnsRegex(pricedata.DataWarning, r"EURUSD H4: priceData's HTF-vs-M1 verification FAILED \(2 missing\)"):
+            s = pricedata.build_spec("EURUSD", ["H1", "H4"], root=self.root)
+        self.assertEqual([n["level"] for n in s["notes"]], ["warn"])
+        self.assertIn("FAILED", s["notes"][0]["text"])
+
+    def test_cli_rows_label_only_the_pages_that_show_pre_clean_bars(self):
+        import re
+        from chartlab import cli
+        rows = [{"dir": "long", "entry_time": "2025-12-31 10:00", "entry_price": 1.1, "id": "old"},
+                {"dir": "long", "entry_time": "2026-01-07 10:00", "entry_price": 1.1, "id": "new"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            rows_file = Path(tmp) / "rows.json"
+            rows_file.write_text(json.dumps(rows))
+            out = Path(tmp) / "pages"
+            args = ["rows", "--rows", str(rows_file), "--root", str(self.root), "--symbol", "EURUSD",
+                    "--timeframe", "H1", "--clock", "ftmo", "--pre", "5", "--post", "5", "--out", str(out)]
+            with self.assertRaises(ValueError):                       # clean years only: 12-31 is not there
+                cli.main(args)
+            cli.main(args + ["--pre-clean"])
+            notes = {}
+            for sid in ("old", "new"):
+                html = (out / f"{sid}.html").read_text(encoding="utf-8")
+                payload = re.search(r'<script id="payload" type="application/json">(.*?)</script>', html, re.S)
+                notes[sid] = json.loads(payload.group(1))["notes"]
+        self.assertEqual([n["level"] for n in notes["old"]], ["warn", "info"])
+        self.assertIn("PRE-CLEAN", notes["old"][0]["text"])
+        self.assertEqual([n["level"] for n in notes["new"]], ["info"])
+        self.assertIn("ChartLab re-checked this page's H1 bars against M1: they match", notes["new"][0]["text"])
+
+    def test_short_windows_unverifiable_by_m1_are_covered_by_the_pricedata_verdict(self):
+        res = {"W1": {"status": "unverified", "reason": "M1 covers no whole bar in the window", "short_window": True},
+               "MN": {"status": "unverified", "reason": "no M1 file at x"},
+               "H1": {"status": "clean"}}
+        ok = {"W1": {"verified": True}, "MN": {"verified": True}}
+        self.assertEqual(list(pricedata.covered_by_pricedata(res, ok)), ["MN", "H1"])     # no M1 file stays
+        self.assertEqual(list(pricedata.covered_by_pricedata(res, {"W1": {"verified": None}})), ["W1", "MN", "H1"])
+
+    def test_notes_never_claim_a_check_that_did_not_run(self):
+        (self.root / "data" / "clean" / "EURUSD" / "EURUSD_M1.parquet").unlink()
+        with self.assertWarnsRegex(pricedata.DataWarning, "NOT verified against M1"):
+            s = pricedata.build_spec("EURUSD", ["H1"], root=self.root)
+        self.assertEqual([n["level"] for n in s["notes"]], ["warn"])
+        self.assertNotIn("re-checked", s["notes"][0]["text"])
+
+
 @unittest.skipIf(pd is None or not (REAL_PRICEDATA / "data" / "clean").is_dir(),
                  "real priceData folder not present")
 class TestRealPriceData(unittest.TestCase):
@@ -391,6 +564,32 @@ class TestRealPriceData(unittest.TestCase):
             for tf in ("H4", "D1", "W1", "MN"):
                 df = pricedata.load_frame(sym, tf, root=REAL_PRICEDATA)
                 self.assertGreater(len(df), 10, f"{sym} {tf}")
+
+    def test_clean_years_only_and_pricedata_verified_every_timeframe(self):
+        tfs = ("M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN")
+        for sym in pricedata.SYMBOLS:
+            cf = pricedata.clean_from(sym, REAL_PRICEDATA)
+            self.assertEqual(cf, pd.Timestamp("2022-01-01"), sym)
+            df = pricedata.load_frame(sym, "H4", root=REAL_PRICEDATA, clock="server")
+            self.assertGreaterEqual(df.index[0], cf, sym)
+            st = pricedata.verification_status(sym, tfs, REAL_PRICEDATA)
+            self.assertEqual({tf: v["verified"] for tf, v in st.items()}, dict.fromkeys(tfs, True), sym)
+
+    def test_pre_clean_years_are_price_verified_fx_only_and_match_m1(self):
+        want = {"EURUSD": "2020-01-01", "GBPUSD": "2019-01-02", "USDJPY": "2020-01-01",
+                "XAUUSD": None, "XAGUSD": None, "BTCUSD": None}
+        for sym, first in want.items():
+            got = pricedata.pre_clean_from(sym, REAL_PRICEDATA)
+            self.assertEqual(got, pd.Timestamp(first) if first else None, sym)
+        # 2021 EURUSD H1 (pre-clean) against the pre-clean M1: must match bar for bar
+        h1 = pricedata.load_frame("EURUSD", "H1", root=REAL_PRICEDATA, pre_clean=True,
+                                  start="2021-03-01", end="2021-06-01")
+        self.assertGreater(h1.attrs["pre_clean_rows"], 1000)
+        r = pricedata.check_vs_m1("EURUSD", {"H1": h1}, start="2021-03-01", end="2021-06-01",
+                                  root=REAL_PRICEDATA)["H1"]
+        self.assertEqual((r["status"], len(r["missing"]), len(r["mismatched"]), len(r["extra"])),
+                         ("clean", 0, 0, 0))
+        self.assertGreater(r["compared"], 1000)
 
 
 def _setups(rows, tf, **kw):

@@ -62,6 +62,13 @@ class Scripted(Strategy):
         return Target(direction=self.direction if self.lo <= t < self.hi else 0, lots=1.0)
 
 
+# Swap timing is tested with fixed numbers (priceData's XAUUSD swap on 2026-09-23, tester-verified
+# -83 -> -249 over the Wednesday), so it does not move when priceData's cost table does.
+TIMING_COSTS = CostConfig(contract_size_oz=100, commission_per_side_per_lot=0.0, commission_pct_side=0.0,
+                          slippage_per_side_usd=0.0, swap_long_per_lot_per_day=-83.0,
+                          swap_short_per_lot_per_day=-8.3) if pd is not None else None
+
+
 def run(first_day, days, open_after, close_after, clock="ftmo", direction=1):
     """One scripted trade; the times are FTMO server labels in every clock."""
     server = gold_m1_server(first_day, days)
@@ -73,7 +80,7 @@ def run(first_day, days, open_after, close_after, clock="ftmo", direction=1):
         index = server
     m1 = flat_m1(index)
     signal = m1.resample("1h").first().dropna()
-    res = run_backtest(m1, signal, Scripted(lo, hi, direction), CostConfig(),
+    res = run_backtest(m1, signal, Scripted(lo, hi, direction), TIMING_COSTS,
                        BacktestConfig(data_clock=clock, default_lots=1.0))
     trades = res.trades[res.trades.exit_reason == "signal"]
     assert len(trades) == 1, res.trades
@@ -82,7 +89,7 @@ def run(first_day, days, open_after, close_after, clock="ftmo", direction=1):
 
 @unittest.skipIf(pd is None, "pandas/numpy not installed")
 class TestSwapTiming(unittest.TestCase):
-    LONG = -83.0          # CostConfig default, USD per lot per night
+    LONG = -83.0          # TIMING_COSTS, USD per lot per night
     SHORT = -8.3
 
     def test_tue_to_fri_pays_tue_wed_x3_thu(self):
@@ -133,10 +140,55 @@ class TestSwapTiming(unittest.TestCase):
         m1 = flat_m1(gold_m1_server("2025-06-09", 2))
         with self.assertRaises(ValueError):
             run_backtest(m1, m1.resample("1h").first().dropna(), Scripted("2025", "2026"),
-                         CostConfig(), BacktestConfig(data_clock="EET"))
+                         TIMING_COSTS, BacktestConfig(data_clock="EET"))
 
 
-@unittest.skipIf(pd is None, "pandas/numpy not installed")
+def _cost_models():
+    """priceData's COST_MODELS, read straight from its package (not through ChartLab)."""
+    import importlib.util
+    init = Path(r"C:\personalCode\priceData") / "price_data" / "__init__.py"
+    mod = sys.modules.get("_test_price_data")
+    if mod is None:
+        spec = importlib.util.spec_from_file_location("_test_price_data", init)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["_test_price_data"] = mod          # its dataclasses look their module up
+        spec.loader.exec_module(mod)
+    return mod.COST_MODELS
+
+
+HAVE_PRICEDATA = (Path(r"C:\personalCode\priceData") / "price_data" / "__init__.py").exists()
+
+
+@unittest.skipIf(pd is None or not HAVE_PRICEDATA, "needs pandas and the priceData package")
+class TestCostsFromPriceData(unittest.TestCase):
+    """FTMO costs come from priceData's COST_MODELS only: no copied number in ChartLab."""
+
+    def test_defaults_are_pricedata_xauusd(self):
+        m = _cost_models()["XAUUSD"]
+        c = CostConfig()
+        self.assertEqual(c.symbol, "XAUUSD")
+        self.assertEqual(c.contract_size_oz, m["contract"])
+        self.assertEqual((c.commission_per_side_per_lot, c.commission_pct_side), (0.0, m["commission_pct_side"]))
+        self.assertAlmostEqual(c.slippage_per_side_usd, m["slippage_pip_per_fill"] * m["pip"])
+        self.assertAlmostEqual(c.swap_long_per_lot_per_day, m["swap_long_pts"] * m["point"] * m["contract"])
+        self.assertAlmostEqual(c.swap_short_per_lot_per_day, m["swap_short_pts"] * m["point"] * m["contract"])
+
+    def test_fx_symbol_gets_the_flat_commission_and_its_own_swap(self):
+        m = _cost_models()["EURUSD"]
+        c = CostConfig(symbol="EURUSD")
+        self.assertEqual((c.contract_size_oz, c.commission_per_side_per_lot, c.commission_pct_side),
+                         (m["contract"], m["commission_usd_lot_side"], 0.0))
+        self.assertAlmostEqual(c.slippage_per_side_usd, m["slippage_pip_per_fill"] * m["pip"])
+        self.assertAlmostEqual(c.swap_long_per_lot_per_day, m["swap_long_pts"] * m["point"] * m["contract"])
+
+    def test_an_explicit_value_wins_and_unsupported_symbols_are_refused(self):
+        self.assertEqual(CostConfig(slippage_per_side_usd=0.0).slippage_per_side_usd, 0.0)
+        for sym in ("USDJPY", "BTCUSD"):                   # non-USD quote / percent-of-price swap
+            with self.assertRaises(ValueError):
+                CostConfig(symbol=sym)
+
+
+@unittest.skipIf(pd is None or not HAVE_PRICEDATA, "needs pandas and the priceData package")
 class TestCostFile(unittest.TestCase):
     def test_old_file_with_flat_commission_warns_about_the_added_percent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,7 +196,8 @@ class TestCostFile(unittest.TestCase):
             old.write_text(json.dumps({"commission_per_side_per_lot": 3.0}))
             with self.assertWarnsRegex(UserWarning, "commission_pct_side"):
                 c = CostConfig.from_json(old)
-            self.assertEqual((c.commission_per_side_per_lot, c.commission_pct_side), (3.0, 0.0007))
+            self.assertEqual((c.commission_per_side_per_lot, c.commission_pct_side),
+                             (3.0, _cost_models()["XAUUSD"]["commission_pct_side"]))
             new = Path(tmp) / "fx.json"
             new.write_text(json.dumps({"commission_per_side_per_lot": 2.5, "commission_pct_side": 0}))
             with warnings.catch_warnings():

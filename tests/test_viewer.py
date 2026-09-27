@@ -252,6 +252,31 @@ class TestNetUnitShown(unittest.TestCase):
             self.assertTrue(label.endswith(tail), label)
 
 
+@unittest.skipUnless(BROWSER, "no headless Edge/Chrome found (set CHARTLAB_BROWSER)")
+class TestDataNotesBadge(unittest.TestCase):
+    """A page says what its bars are: the footer badge is amber when a note warns, and lists the notes."""
+
+    def test_badge_counts_warnings_and_opens_the_list(self):
+        bars = _walk(60, M15)
+        warn = chart.spec("EURUSD", {"M15": bars}, notes=[
+            {"level": "warn", "text": "EURUSD: bars before 2021-12-31 22:00 UTC are priceData PRE-CLEAN years"},
+            {"level": "info", "text": "EURUSD M15: priceData verified these native bars against M1"}])
+        ok = chart.spec("EURUSD", {"M15": bars}, notes=["EURUSD M15: priceData verified"])
+        none = chart.spec("EURUSD", {"M15": bars})
+        probe = """var d=ChartLab.debug();document.getElementById('stNotes').click();
+                   var p=document.getElementById('notesPanel');
+                   return {badge:d.notesBadge,warn:d.notesWarn,notes:d.notes,open:!p.classList.contains('hide'),
+                           rows:[].map.call(p.querySelectorAll('.n'),function(e){return e.className+'|'+e.textContent})};"""
+        with tempfile.TemporaryDirectory() as tmp:
+            w = run_page(_render(tmp, warn, "w.html"), probe)
+            o = run_page(_render(tmp, ok, "o.html"), probe)
+            n = run_page(_render(tmp, none, "n.html"), "return ChartLab.debug();")
+        self.assertEqual((w["badge"], w["warn"], w["notes"], w["open"]), ("⚠ Data: 1 warning", 1, 2, True))
+        self.assertTrue(w["rows"][0].startswith("n warn|⚠EURUSD: bars before"), w["rows"])
+        self.assertEqual((o["badge"], o["warn"]), ("✓ Data", 0))
+        self.assertIsNone(n["notesBadge"])
+
+
 @unittest.skipUnless(BROWSER and pd is not None, "needs a headless browser and pandas")
 class TestSetupPagesOffGrid(unittest.TestCase):
     """todo item 1 through the real rows path: setups_from_rows -> render_pages with --extra-tfs."""

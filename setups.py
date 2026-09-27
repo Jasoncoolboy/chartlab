@@ -283,14 +283,15 @@ def page_windows(df: pd.DataFrame, setups: list[Setup], pre: int = 60, post: int
 def slice_spec(df: pd.DataFrame, setup: Setup, pre_bars: int = 60,
                post_bars: int = 45, *, symbol: str | None = None,
                extra_frames: dict | None = None, exchange: str = "setup",
-               source: str | None = None, tz: str | None = None) -> dict:
+               source: str | None = None, tz: str | None = None, notes=None) -> dict:
     """One setup's page: bars around its trigger, its trade, zone(s) and indicators.
 
     ``df`` is the setup's own timeframe in UTC (any OHLC column style) and the
     setup's times are UTC epochs. ``extra_frames`` ({tf: frame}, UTC) adds
     timeframe buttons; views that would be too large are skipped. The symbol
     comes from the setup, else ``symbol``. ``tz`` is the viewer's initial
-    display zone (UTC or MYT, default MYT).
+    display zone (UTC or MYT, default MYT). ``notes`` are the page's data notes
+    (see ``chart.notes_from_rows``).
     """
     sub, extra_subs = _page_slices(df, setup, pre_bars, post_bars, extra_frames)
     tf = setup.tf
@@ -312,7 +313,7 @@ def slice_spec(df: pd.DataFrame, setup: Setup, pre_bars: int = 60,
         setup.symbol or symbol or "Chart", blocks, exchange=exchange, source=source,
         tz=tz, period_label=tf, default_tf=tf,
         trades=[trade], zones=_zones_of(setup),
-        indicators=setup_indicators(sub, setup), view=view)
+        indicators=setup_indicators(sub, setup), view=view, notes=notes)
 
 
 def write_catalog(out_dir: Path, setups: list[Setup], cfg: dict) -> Path:
@@ -368,9 +369,10 @@ def render_pages(df: pd.DataFrame, setups: list[Setup], out_dir: Path,
                  pre: int = 60, post: int = 45,
                  lib_dir: str = "../../lib", *, symbol: str | None = None,
                  extra_frames: dict | None = None, source: str | None = None,
-                 tz: str | None = None) -> list[Path]:
+                 tz: str | None = None, notes=None, page_notes: dict | None = None) -> list[Path]:
     """Write one page per setup (frames and setup times in UTC). ``tz`` (UTC or
-    MYT, default MYT) is the display zone used in titles and the viewer's start."""
+    MYT, default MYT) is the display zone used in titles and the viewer's start.
+    ``notes`` go on every page; ``page_notes`` ({setup id: notes}) on one page each."""
     tz = tz or chart.DEFAULT_TZ
     ids = [s.id for s in setups]
     dupes = sorted({i for i in ids if ids.count(i) > 1})
@@ -383,7 +385,8 @@ def render_pages(df: pd.DataFrame, setups: list[Setup], out_dir: Path,
     written = []
     for s in setups:
         page = slice_spec(df, s, pre_bars=pre, post_bars=post, symbol=symbol,
-                          extra_frames=extras, source=source, tz=tz)
+                          extra_frames=extras, source=source, tz=tz,
+                          notes=list((page_notes or {}).get(s.id) or []) + list(notes or []))
         title = f"{s.label} · {s.tf} {chart.to_iso(s.trigger_time, tz, True)}"
         written.append(chart.render(page, out_dir / f"{s.id}.html",
                                     title=title, lib_dir=lib_dir))

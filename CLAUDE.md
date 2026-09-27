@@ -6,8 +6,18 @@ true UTC inside, Malaysian time on screen. Source of truth: `README.md`, `docs/A
 
 ## ⛔⛔ FTMO bars and costs come from priceData ONLY (owner rule, 2026-09-26)
 
-⏭ **NEXT SESSION PRIORITY (owner, 2026-09-27): execute the switch below before any other work here.** The order across
-projects and the routine to follow: `C:\personalCode\priceData\todo.md` "NEXT SESSION — DO THIS FIRST" (this project is #9).
+✅ **SWITCHED 2026-09-27** (priceData `todo.md` project #9). Tests 166 → 184, all pass. What was done:
+* bars: `data/clean` only (2022+); a `start` before it warns. `pre_clean=True` / `--pre-clean` adds only the years whose
+  PRICES priceData verified (`pricedata.pre_clean_from`: FX 2020-21, GBPUSD from 2019; none for metals/BTC), for context,
+  labelled on the page. Checked: those years match M1 on M5..MN (48 frames); priceData's M1 day/hour-aggregate detectors
+  find 0 there (256 / 3,826 on the raw 2019 / 2021 dumps = the positive control).
+* priceData's own verdict (manifest `htf_verified`) is read and shown with ChartLab's M1 check as page data notes.
+* costs: `CostConfig` reads `COST_MODELS` (`config.ftmo_costs`, `pricedata.cost_model`); no cost number is copied here.
+  `backtest --source ftmo` runs the legacy demo on priceData bars + costs (never quote it).
+* No pre-2022 number is recorded in this project.
+
+⏭ ~~NEXT SESSION PRIORITY (owner, 2026-09-27): execute the switch below before any other work here.~~ Done (above). The order
+across projects and the routine: `C:\personalCode\priceData\todo.md` "NEXT SESSION — DO THIS FIRST" (this project is #9).
 
 Every FTMO price and every FTMO cost used here comes from **`C:\personalCode\priceData`** and nowhere else:
 
@@ -28,7 +38,7 @@ Every FTMO price and every FTMO cost used here comes from **`C:\personalCode\pri
 * Refresh: `python C:\personalCode\priceData\scripts\update_data.py` (terminal closed). Year verdicts:
   `priceData/docs/DATA_QUALITY.md`.
 
-**What this project must switch** (from a code search, 2026-09-27; nothing here has been changed yet):
+**What this project had to switch** (from a code search, 2026-09-27; all done the same day, see ✅ above):
 
 1. **`pricedata.py`** reads `data/clean/{SYM}/{SYM}_{TF}.parquet` directly. Since 2026-09-26 that is **2022+ only**. A page
    that needs older bars for context must ask for `data/pre_clean` explicitly (e.g. `PriceData.load(..., include_pre_clean=True)`),

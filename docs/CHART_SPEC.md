@@ -34,6 +34,7 @@ or programmatically with `chart.validate(spec)` (returns a list of problems; emp
 | `tz`               | `"MYT"` / `"UTC"` | no       | How the viewer DISPLAYS times when the page opens (default `MYT`, Malaysian time, UTC+8). The data is never shifted; the page also has MYT / UTC buttons, `?tz=UTC` in the URL, and remembers the last choice. |
 | `source`           | string            | no       | Where the bars came from: `"ftmo"` or `"dukascopy"` (informational; set by the adapters). |
 | `view`             | object            | no       | `{ "from": time, "to": time }` (UTC): the time range the page opens on. Without it the page opens fitted to every bar of `defaultTimeframe`. Setup pages set it to their pre/post window. `Fit` / double-click still shows every bar. |
+| `notes`            | list              | no       | Data notes: what the bars are and how they were checked. Each is text or `{ "level": "info" \| "warn", "text": … }`. The footer shows a badge — `✓ Data`, or amber `⚠ Data: N warnings` when one warns — and clicking it lists them. `pricedata.build_spec` and the `rows`/`setup` commands write them (priceData's verification, the M1 check, pre-clean years). |
 | `precision`        | int 0–8           | no       | Price decimals shown on the axis, legends and trade labels, and the scale compact encoding uses. Inferred from the bars when absent (`spec()`/`normalize()` write it; the viewer infers it for hand-written or loader specs): 5 for 5-digit FX, 3 for JPY, 2 for gold, never below 2. Set it explicitly only to show fewer or more digits than the data has. |
 
 The chart opens on `defaultTimeframe` and switches between the provided timeframes
@@ -216,6 +217,7 @@ render(s, "out.html", title="XAUUSD D1", inline_lib=False)
 | `indicators_from_rows(rows)` | rows → normalized indicators |
 | `stats_from_rows(rows)` | rows / `{label: value}` → normalized stats |
 | `norm_view(view)` | `{from, to}` / `(from, to)` → the `view` field (raises on a bad range) |
+| `notes_from_rows(rows)` | text / `{level, text}` (or a list) → the `notes` field (raises on an unknown level or empty text) |
 | `norm_net_unit(unit)` | `"$"` / `"R"` / `"pips"` (+ aliases) → the `netUnit` field |
 | `encode_block(block)` / `encode_timeframes(blocks)` | bar block(s) → compact base64 |
 | `bars_from_csv(path, ...)` | CSV → bar block (auto-detects columns) |

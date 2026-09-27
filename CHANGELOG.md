@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### priceData is the one source of FTMO bars and costs (owner rule 2026-09-26; switched 2026-09-27)
+
+- **Clean years only.** Pages use priceData's `data/clean` (its verified-clean years, from
+  `clean_from` = 2022-01-01); a `start` before it raises a `DataWarning` saying what was left out.
+  `pre_clean=True` / `--pre-clean` (`load_frame`, `build_spec`, `chart`, `setup`, `rows`) adds, for
+  context only, the earlier years whose *prices* priceData verified (`pricedata.pre_clean_from`: FX
+  from 2020-01-01, GBPUSD from 2019-01-02; none for XAUUSD/XAGUSD/BTCUSD). The repaired years before
+  them are never loaded, and the page labels pre-clean bars. Checked on the real data: those years
+  match M1 on M5…MN (48 frames), and priceData's M1 detectors find no day or hour aggregate there
+  (positive control: 256 / 3,826 on the raw 2019 / 2021 dumps).
+- **priceData's own verdict is read** from its manifest (`pricedata.verification_status`,
+  `describe_verification`): a failed or missing `htf_verified` raises a `DataWarning`. A short window
+  that M1 cannot check on W1/MN is covered by that verdict (`covered_by_pricedata`), so it no longer
+  reads "NOT verified"; a missing M1 file still does.
+- **Data notes on the page** — spec field `notes` (`chart.notes_from_rows`; text or `{level: info|warn,
+  text}`), a footer badge (`✓ Data` / amber `⚠ Data: N warnings`) that lists them when clicked.
+  `build_spec` writes them (`pricedata.page_notes`); `setup` / `rows` write each page's own (its bars'
+  M1 check, a pre-clean label only where the page shows pre-clean bars); Dukascopy pages say they are
+  not FTMO data, and FTMO bars read from a file say they are not priceData's. Closes the known limit
+  "data warnings go to the terminal only".
+- **Costs from `COST_MODELS`.** `CostConfig` fields left at `None` are filled from priceData's
+  `COST_MODELS` for its `symbol` (`config.ftmo_costs`, `pricedata.cost_model`, `pricedata.package`):
+  no copied cost number is left in ChartLab. The XAUUSD values are unchanged (0.0007 %/side, $0.05
+  slippage, swap −83 / −8.3). FX symbols get their flat $/lot commission; non-USD-quoted symbols and
+  BTCUSD's percent-of-price swap are refused (the engine books USD with a fixed swap per night).
+- **`backtest --source ftmo --symbol …`**: the legacy demo runs on priceData's clean years (ask = BID +
+  priceData's spread) and prints the costs it used. It had never run end to end before; it now does
+  (XAUUSD 2022-01 → 2026-09 in ~20 s; commission and swap totals reconcile by hand). Never quote it.
+- `rows` names `--pre-clean` when a row falls before the clean data.
+
 Fixes for the issues found generating 80 System 3 setup pages on 2026-09-23 (`todo.md`).
 
 ### Fixed
