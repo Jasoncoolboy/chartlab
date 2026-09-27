@@ -6,7 +6,10 @@ true UTC inside, Malaysian time on screen. Source of truth: `README.md`, `docs/A
 
 ## ⛔⛔ FTMO bars and costs come from priceData ONLY (owner rule, 2026-09-26)
 
-✅ **SWITCHED 2026-09-27** (priceData `todo.md` project #9). Tests 166 → 184, all pass. What was done:
+✅ **SWITCHED 2026-09-27** (priceData `todo.md` project #9; released as **v0.4.0**, pushed with tags). Tests 166 → 184
+after the switch, 187 with the same day's viewer fixes (overlays painted in the chart's own frame so they stay on their
+price/time; a timeframe switch keeps the time window). Owner decisions that day: the price axis fits the candles only
+(zoom out for an overlay outside them), and the Dukascopy path stays as it is. What was done:
 * bars: `data/clean` only (2022+); a `start` before it warns. `pre_clean=True` / `--pre-clean` adds only the years whose
   PRICES priceData verified (`pricedata.pre_clean_from`: FX 2020-21, GBPUSD from 2019; none for metals/BTC), for context,
   labelled on the page. Checked: those years match M1 on M5..MN (48 frames); priceData's M1 day/hour-aggregate detectors
