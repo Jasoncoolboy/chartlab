@@ -3,9 +3,10 @@
 **Status 2026-09-27:** items 1–6 done, including item 3's priceData verification status; open work and caveats are in
 `NEXT-SESSION.md`.
 
-Issues found generating 80 setup pages for `C:\personalCode\tradingProjects\engulfingCore\archive\scalperEngulfingSystem` (System 3) on 2026-09-23 via
+Issues found generating 80 setup pages for System 3 (scalperEngulfingSystem; its documents are now in
+`C:\personalCode\tradingProjects\engulfingCore\docs\reference\scalperEngulfingSystem`) on 2026-09-23 via
 `setups.setups_from_rows` / `render_pages`. Checked with headless-Edge screenshots before and after each workaround.
-The workarounds live in `scalperEngulfingSystem/tools/chart/system3_setup_pages.py`.
+The workarounds live in `C:\personalCode\tradingProjects\engulfingCore\egcore\engine\s3\tools\chart\system3_setup_pages.py`.
 
 ## 1. 🔴 An overlay time that is not a bar of the displayed timeframe is silently not drawn
 
