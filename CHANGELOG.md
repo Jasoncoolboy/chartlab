@@ -142,7 +142,7 @@ and 5-digit FX fixed.
 - `clock` (`ftmo` | `utc` | `myt`) is **required** wherever times are handed in with a source's
   bars - `pricedata.build_spec` trades/zones/equity, `setups_from_rows`, `--clock` - because a
   wrong guess is a silent 2-3 hour error. Zone-carrying times (`...Z`, `+08:00`) are absolute.
-- `pricedata.py`: strict loader + `build_spec` for the clean bars in `C:\personalCode\priceData`
+- `pricedata.py`: strict loader + `build_spec` for the clean bars in `C:\personalCode\tradingProjects\priceData`
   (native timeframes, `PRICEDATA_ROOT` / `root=`). Refuses unsorted, duplicated, NaN,
   incoherent-OHLC or timezone-aware files, and re-checks after the UTC conversion.
 - `precision` spec field (0-8), inferred from the bars (`chart.infer_precision`) and used

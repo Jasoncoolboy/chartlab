@@ -24,8 +24,8 @@ if pd is not None:
     import test_pipeline  # noqa: F401  (registers the chartlab package)
     from chartlab import chart, pricedata, sources as S
 
-REAL_PRICEDATA = Path(r"C:\personalCode\priceData")
-DUKA_LIB = Path(r"C:\personalCode\mtf-regime-engine-v22.4\data\library")
+REAL_PRICEDATA = Path(r"C:\personalCode\tradingProjects\priceData")
+DUKA_LIB = Path(r"C:\personalCode\tradingProjects\mtf-regime-engine-v22.4\data\library")
 
 
 def week_frame(weeks=4, freq="15min", start="2026-01-05", labels="server", attrs=None, spread=True):

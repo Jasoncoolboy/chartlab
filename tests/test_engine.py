@@ -146,7 +146,7 @@ class TestSwapTiming(unittest.TestCase):
 def _cost_models():
     """priceData's COST_MODELS, read straight from its package (not through ChartLab)."""
     import importlib.util
-    init = Path(r"C:\personalCode\priceData") / "price_data" / "__init__.py"
+    init = Path(r"C:\personalCode\tradingProjects\priceData") / "price_data" / "__init__.py"
     mod = sys.modules.get("_test_price_data")
     if mod is None:
         spec = importlib.util.spec_from_file_location("_test_price_data", init)
@@ -156,7 +156,7 @@ def _cost_models():
     return mod.COST_MODELS
 
 
-HAVE_PRICEDATA = (Path(r"C:\personalCode\priceData") / "price_data" / "__init__.py").exists()
+HAVE_PRICEDATA = (Path(r"C:\personalCode\tradingProjects\priceData") / "price_data" / "__init__.py").exists()
 
 
 @unittest.skipIf(pd is None or not HAVE_PRICEDATA, "needs pandas and the priceData package")

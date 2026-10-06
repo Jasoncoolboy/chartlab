@@ -10,7 +10,7 @@ It comes in three layers:
    [`docs/CHART_SPEC.md`](docs/CHART_SPEC.md) and
    [`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md).
 2. **The data adapters** (`sources.py`, `pricedata.py`, `export.py`, `setups.py`) — read
-   the two data sources this research uses, **FTMO** (`C:\personalCode\priceData`) and
+   the two data sources this research uses, **FTMO** (`C:\personalCode\tradingProjects\priceData`) and
    **Dukascopy**, identify which one a file is, convert everything to true UTC, build
    charts and per-setup pages, and turn **another system's setup rows** into pages.
    Requires `pandas`, `numpy`, `pyarrow`.
@@ -154,7 +154,7 @@ Lightweight-Charts build live in `assets/`; you can point elsewhere with
 
 ## Using it from another system (FTMO or Dukascopy data)
 
-**FTMO bars and FTMO costs come from `C:\personalCode\priceData` and nowhere else** (owner rule
+**FTMO bars and FTMO costs come from `C:\personalCode\tradingProjects\priceData` and nowhere else** (owner rule
 2026-09-26): bars from `data/clean/{SYM}/{SYM}_{TF}.parquet` (native, BID, 9 symbols × M1…MN), costs
 from its `price_data.COST_MODELS` (`pricedata.cost_model(symbol)`; evidence in priceData's
 `docs/COSTS.md`). Override the folder with `PRICEDATA_ROOT` or `root=`. The loader refuses a file that
@@ -208,7 +208,7 @@ chart.render(spec, r"C:\out\eurusd.html", inline_lib=True)
 The same frames, for your own session logic (`df.index.hour` is UTC):
 `pricedata.load_frame("EURUSD", "M15")`; `clock="server"` returns FTMO's raw labels instead.
 
-Only need the renderer and have your own bars? `sys.path.insert(0, r"C:\personalCode\chartlab")`
+Only need the renderer and have your own bars? `sys.path.insert(0, r"C:\personalCode\tradingProjects\chartlab")`
 then `import chart` — standard library only, no pandas (times must be UTC epochs).
 
 ### Route B — CLI (any language)
@@ -375,7 +375,7 @@ python -m unittest discover -s tests -v
 
 `test_pipeline.py`, `test_sources.py` and `test_engine.py` skip themselves without
 pandas/pyarrow; their real-data classes read the priceData folder and the packaged Dukascopy
-library (`C:\personalCode\mtf-regime-engine-v22.4\data\library`) and skip when those are absent.
+library (`C:\personalCode\tradingProjects\mtf-regime-engine-v22.4\data\library`) and skip when those are absent.
 `test_viewer.py` loads rendered pages in a headless Edge or Chrome and reads back what the viewer
 painted (`window.ChartLab.debug()`); it skips when no browser is found (`CHARTLAB_BROWSER` points
 at one). About 10 s. The whole suite takes about a minute.

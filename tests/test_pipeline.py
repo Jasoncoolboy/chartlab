@@ -31,7 +31,7 @@ except ImportError:  # pragma: no cover
     HAVE_PARQUET = False
 
 ROOT = Path(__file__).resolve().parents[1]
-REAL_PRICEDATA = Path(r"C:\personalCode\priceData")
+REAL_PRICEDATA = Path(r"C:\personalCode\tradingProjects\priceData")
 
 
 def _load_package():

@@ -20,11 +20,11 @@ price/time; a timeframe switch keeps the time window). Owner decisions that day:
 * No pre-2022 number is recorded in this project.
 
 ⏭ ~~NEXT SESSION PRIORITY (owner, 2026-09-27): execute the switch below before any other work here.~~ Done (above). The order
-across projects and the routine: `C:\personalCode\priceData\todo.md` "NEXT SESSION — DO THIS FIRST" (this project is #9).
+across projects and the routine: `C:\personalCode\tradingProjects\priceData\todo.md` "NEXT SESSION — DO THIS FIRST" (this project is #9).
 
-Every FTMO price and every FTMO cost used here comes from **`C:\personalCode\priceData`** and nowhere else:
+Every FTMO price and every FTMO cost used here comes from **`C:\personalCode\tradingProjects\priceData`** and nowhere else:
 
-* **Bars:** `PriceData(r"C:\personalCode\priceData").load(sym, tf)` (or `data/clean/{SYM}/{SYM}_{TF}.parquet`):
+* **Bars:** `PriceData(r"C:\personalCode\tradingProjects\priceData").load(sym, tf)` (or `data/clean/{SYM}/{SYM}_{TF}.parquet`):
   FTMO server time (EET/EEST on the US DST calendar), **BID**, 9 symbols × M1..MN, every bar verified against M1.
   It holds **only the verified-clean years, from `clean_from` = 2022-01-01**. The repaired 2019-21 bars are in
   `data/pre_clean/` and come back only with `load(..., include_pre_clean=True)`: charts and indicator warm-up, never a
@@ -38,7 +38,7 @@ Every FTMO price and every FTMO cost used here comes from **`C:\personalCode\pri
   there first (its README, "Add a New Symbol"). Dukascopy is allowed only as an independent cross-check.
 * Any number already recorded here off pre-2022 data, another data source or another cost table is **out of rule**.
   Say so whenever it is quoted.
-* Refresh: `python C:\personalCode\priceData\scripts\update_data.py` (terminal closed). Year verdicts:
+* Refresh: `python C:\personalCode\tradingProjects\priceData\scripts\update_data.py` (terminal closed). Year verdicts:
   `priceData/docs/DATA_QUALITY.md`.
 
 **What this project had to switch** (from a code search, 2026-09-27; all done the same day, see ✅ above):

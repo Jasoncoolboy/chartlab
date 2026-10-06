@@ -1,6 +1,6 @@
 """FTMO priceData adapter: canonical clean bars -> UTC frames and chart specs.
 
-``C:\\personalCode\\priceData`` is the single source of truth for FTMO price
+``C:\\personalCode\\tradingProjects\\priceData`` is the single source of truth for FTMO price
 data (set ``PRICEDATA_ROOT`` or pass ``root=`` to point elsewhere). This module
 reads its clean parquet directly::
 
@@ -47,7 +47,7 @@ import pandas as pd
 
 from . import chart, export, sources
 
-DEFAULT_ROOT = Path(os.environ.get("PRICEDATA_ROOT", r"C:\personalCode\priceData"))
+DEFAULT_ROOT = Path(os.environ.get("PRICEDATA_ROOT", r"C:\personalCode\tradingProjects\priceData"))
 SYMBOLS = ("EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", "NZDUSD",
            "XAUUSD", "XAGUSD", "BTCUSD")
 TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN")

@@ -135,7 +135,7 @@ timeframe you want the switcher to offer; the viewer opens on `defaultTimeframe`
 
 ## FTMO and Dukascopy data, and the clock
 
-Two sources feed this research. **FTMO** bars — and FTMO costs — come from `C:\personalCode\priceData`
+Two sources feed this research. **FTMO** bars — and FTMO costs — come from `C:\personalCode\tradingProjects\priceData`
 only (native, BID, checked against M1 by default — `bars="m1"` builds them from M1; costs via
 `pricedata.cost_model(symbol)` = its `COST_MODELS`); **Dukascopy** bars are UTC and are a cross-check,
 never the FTMO data. ChartLab keeps everything **UTC internally** —
@@ -187,7 +187,7 @@ df = pricedata.load_frame("EURUSD", "M15")       # UTC index: df.index.hour is a
 - **Times need not be on the page's grid.** An M1-precise fill on an M15 page, or an M15 entry on the
   H1 button, is drawn at the bar that contains it. Give `net` a `netUnit` (`"R"`, `"pips"`; `"$"` is
   the default) so the page does not print R as dollars.
-- Without pandas: `sys.path.insert(0, r"C:\personalCode\chartlab"); import chart` and pass your own UTC bars.
+- Without pandas: `sys.path.insert(0, r"C:\personalCode\tradingProjects\chartlab"); import chart` and pass your own UTC bars.
 
 ## Interpreting the output
 

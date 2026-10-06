@@ -476,7 +476,7 @@ def main(argv=None):
     p.add_argument("--source", choices=src_choices, default="ftmo", help=src_help)
     p.add_argument("--assume", choices=["ftmo", "dukascopy"], default=None,
                    help="with --source auto: declare the file's source when it cannot be identified")
-    p.add_argument("--root", default=None, help="priceData root (default $PRICEDATA_ROOT or C:/personalCode/priceData)")
+    p.add_argument("--root", default=None, help="priceData root (default $PRICEDATA_ROOT or C:/personalCode/tradingProjects/priceData)")
     p.add_argument("--max-bars", type=int, default=None, help="keep only the most recent N bars per timeframe")
     p.add_argument("--tz", choices=["MYT", "UTC"], default="MYT", help=tz_help)
     p.add_argument("--clock", choices=["ftmo", "utc", "myt"], default=None, help=clock_help)
