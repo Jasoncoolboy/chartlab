@@ -454,7 +454,7 @@ def describe_check(symbol: str, results: dict) -> list:
 
 def parquet_path(symbol: str, timeframe: str, root: str | Path | None = None) -> Path:
     symbol, timeframe = symbol.upper(), timeframe.upper()
-    if symbol not in SYMBOLS:
+    if symbol not in SYMBOLS and symbol not in (manifest(root).get("symbols") or {}):    # + every symbol priceData lists (33 since 2026-10-07)
         raise ValueError(f"unknown symbol {symbol!r}; priceData has {', '.join(SYMBOLS)}")
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"unknown timeframe {timeframe!r}; priceData has {', '.join(TIMEFRAMES)}")
