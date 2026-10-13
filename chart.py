@@ -470,7 +470,7 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
     page opens on; without it the page opens fitted to every bar. ``notes`` are
     data notes for the footer badge (see ``notes_from_rows``). ``zone_opacity``
     (0-1, viewer default 0.22) is the zones' fill; a zone's own ``opacity`` wins.
-    ``magnet_px`` (0-50, viewer default 6) is how close, in screen pixels, the
+    ``magnet_px`` (0-50, viewer default 20) is how close, in screen pixels, the
     pointer must come to a candle's high, low or close for the crosshair to snap
     to it; 0 leaves the crosshair free.
     """

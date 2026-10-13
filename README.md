@@ -66,7 +66,7 @@ refused, and a frame already converted to UTC is never converted twice.
 - Prices at the instrument's own precision — 5-digit FX, 3-digit JPY, 2-digit gold —
   inferred from the bars, or set with the spec's `precision` field.
 - A **free crosshair with a soft magnet**: it follows the pointer, and snaps to the candle's high, low
-  or close only when the pointer comes within a few pixels of one (spec `magnetPx`, default 6; `?magnet=0`
+  or close only when the pointer comes within 20 pixels of one (spec `magnetPx`, default 20; `?magnet=0`
   in the URL or the **Magnet** box in the toolbar turns the snap off; the box is remembered).
 - Trades (entry/exit, SL/TP, P/L in `$`, `R` or pips) and rectangular **zones** drawn on the price
   axis (fill opacity: spec `zoneOpacity`, default 0.22, or a zone's own `opacity`; the border stays

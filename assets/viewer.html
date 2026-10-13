@@ -161,8 +161,8 @@ var PAL=["#2962ff","#e91e63","#7b1fa2","#00897b","#f4511e","#c0ca33","#5e35b1","
 var chart,series,volumeSeries,eqChart,eqSeries,canvas,ctx;
 var curTF=null,drawings=[],drawMode=null,drawBuf=null,indSeries=[];
 var PAINTED={zones:[],trades:[]};
-// Soft magnet (spec magnetPx, ?magnet=<px>, 0 = off) and the zone fill opacity (spec zoneOpacity, a zone's own opacity).
-var MAGNET_PX=6,magnetOn=true,CROSS=null,ZONE_FILL=0.22,ZONE_LINE=0.85;
+// Soft magnet (spec magnetPx, default 20 px since 0.4.2, ?magnet=<px>, 0 = off) and the zone fill opacity (spec zoneOpacity, a zone's own opacity).
+var MAGNET_PX=20,magnetOn=true,CROSS=null,ZONE_FILL=0.22,ZONE_LINE=0.85;
 function $(id){return document.getElementById(id)}
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
 function b64bytes(v){var bin=atob(v||""),n=bin.length,u=new Uint8Array(n);for(var i=0;i<n;i++)u[i]=bin.charCodeAt(i);return u}
@@ -251,7 +251,7 @@ function usePayload(p){
   NOTES=(PAY.notes||[]).filter(function(n){return n&&n.text});
   defTF=PAY.defaultTimeframe||Object.keys(TFS)[0]||"D1";
   PREC=(typeof PAY.precision==="number"&&PAY.precision>=0&&PAY.precision<=8)?Math.floor(PAY.precision):inferPrec();
-  MAGNET_PX=(typeof PAY.magnetPx==="number"&&PAY.magnetPx>=0)?PAY.magnetPx:6;
+  MAGNET_PX=(typeof PAY.magnetPx==="number"&&PAY.magnetPx>=0)?PAY.magnetPx:20;
   try{var mq=new URLSearchParams(location.search).get("magnet");if(mq!==null&&mq!==""&&isFinite(+mq)&&+mq>=0)MAGNET_PX=+mq}catch(e){}
   magnetOn=MAGNET_PX>0;
   try{if(window.localStorage.getItem("chartlab.magnet")==="off")magnetOn=false}catch(e){}

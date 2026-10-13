@@ -448,17 +448,22 @@ def _wide_bars(n=60):
 @unittest.skipUnless(BROWSER, "no headless Edge/Chrome found (set CHARTLAB_BROWSER)")
 class TestSoftMagnet(unittest.TestCase):
     """Owner 2026-10-13: the crosshair stuck to the close (lightweight-charts' Magnet mode). Now it is free and snaps to the
-    hovered candle's high / low / close only when the pointer is within magnetPx (default 6) pixels of one."""
+    hovered candle's high / low / close only when the pointer is within magnetPx pixels of one (default 20 since 0.4.2, was 6:
+    the owner, engulfingCore session 29, "the 6 pixel is too close, maybe make it 20px")."""
 
     def test_free_between_levels_snaps_near_high_low_close(self):
         s = chart.spec("EURUSD", {"H1": _wide_bars()}, tz="UTC")
         with tempfile.TemporaryDirectory() as tmp:
             out = run_page(_render(tmp, s), _MOVES % dict(i=30, high=1.11, low=1.09, close=1.105,
-                                                          ys="yH+3,(yC+yL)/2,yL-4,yC+2,yC-12"))
-        self.assertEqual(out["magnetPx"], 6)
+                                                          ys="yH+3,(yC+yL)/2,yL-4,yC+2,(yH+yC)/2,yC-15"))
+        self.assertEqual(out["magnetPx"], 20)
         self.assertTrue(out["magnetOn"] and out["boxShown"])
         self.assertGreater(out["yL"] - out["yC"], 100, out)                 # the levels are far apart on screen
-        near_high, middle, near_low, near_close, off_close = out["moves"]
+        self.assertGreater(out["yC"] - out["yH"], 50, out)                  # half-way between high and close: > 20 px from both
+        near_high, middle, near_low, near_close, off_close, reach = out["moves"]
+        self.assertTrue(reach["snapped"], reach)                            # 15 px above the close: inside the 20 px reach
+        self.assertAlmostEqual(reach["price"], 1.105, places=9)
+        self.assertEqual(sum(round(p, 9) == 1.105 for p, _ in out["calls"]), 2)    # near_close and reach each snapped once
         self.assertTrue(near_high["snapped"])
         self.assertAlmostEqual(near_high["price"], 1.11, places=9)
         self.assertTrue(near_low["snapped"])
@@ -469,7 +474,7 @@ class TestSoftMagnet(unittest.TestCase):
             self.assertFalse(free["snapped"], free)
             self.assertAlmostEqual(free["price"], free["pointer"], places=9)
         self.assertTrue(1.09 < middle["price"] < 1.105, middle)
-        self.assertGreater(off_close["price"], 1.105)                       # 12 px above the close: not pulled to it
+        self.assertTrue(1.105 < off_close["price"] < 1.11, off_close)       # half-way between close and high: not pulled
         snaps = [round(p, 9) for p, _ in out["calls"]]                  # the library was told to snap (entering the pane
         snaps = [p for i, p in enumerate(snaps) if i == 0 or snaps[i - 1] != p]   # fires mouseenter + mousemove: one snap twice)
         self.assertEqual(snaps, [1.11, 1.09, 1.105])

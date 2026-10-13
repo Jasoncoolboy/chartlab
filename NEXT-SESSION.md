@@ -1,6 +1,10 @@
 # ChartLab — next session / handover
 
-## State (2026-10-13, v0.4.1)
+## State (2026-10-13, v0.4.2)
+
+- **v0.4.2 (engulfingCore session 29, owner: "the 6 pixel is too close, maybe make it 20px and box shading looks fine
+  for now"):** the soft magnet's default reach is 20 px (viewer `MAGNET_PX`, `chart.py` docstring, `docs/CHART_SPEC.md`,
+  README). **193 tests pass** (the magnet test checks the 20 px reach).
 
 - **v0.4.1 (engulfingCore session 28, owner):** the crosshair is FREE with a soft magnet — it snaps to the hovered
   candle's high / low / close only within `magnetPx` screen pixels (default 6; spec `magnetPx`, `chart.spec(magnet_px=)`,

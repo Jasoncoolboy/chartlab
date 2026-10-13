@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-13
+
+### Changed
+
+- **Soft magnet reach 6 → 20 px** (owner, engulfingCore session 29: "the 6 pixel is too close, maybe make it 20px").
+  The crosshair stays free and snaps to the hovered candle's high, low or close when the pointer is within 20 screen
+  pixels of one (spec `magnetPx` / `chart.spec(..., magnet_px=)` / `?magnet=<px>` still override it; `0` = never).
+  The viewer test now checks the 20 px reach: 15 px off the close snaps, half-way between close and high stays free.
+
 ## [0.4.1] - 2026-10-13
 
 A free crosshair with a soft magnet, and clearer zone boxes (owner, engulfingCore session 28).
