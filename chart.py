@@ -206,7 +206,31 @@ def _norm_zone(z: dict) -> dict:
         out["label"] = str(label)
     if z.get("color"):
         out["color"] = str(z["color"])
+    if z.get("opacity") is not None:
+        out["opacity"] = _check_opacity(z["opacity"], "zone opacity")
     return out
+
+
+def _check_opacity(value, what="zoneOpacity") -> float:
+    """A fill opacity: a number from 0 (clear) to 1 (solid). Anything else raises."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} must be a number from 0 to 1, got {value!r}") from None
+    if not 0.0 <= v <= 1.0:
+        raise ValueError(f"{what} must be from 0 to 1, got {value!r}")
+    return v
+
+
+def _check_magnet(value) -> float:
+    """The soft magnet's reach in screen pixels, 0 (a free crosshair) to 50."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"magnetPx must be a number of pixels from 0 to 50, got {value!r}") from None
+    if not 0.0 <= v <= 50.0:
+        raise ValueError(f"magnetPx must be from 0 to 50, got {value!r}")
+    return v
 
 
 def zones_from_rows(rows) -> list:
@@ -434,7 +458,8 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
          default_tf: str | None = None, trades=None, zones=None, equity=None,
          indicators=None, stats=None, title: str | None = None,
          precision: int | None = None, source: str | None = None,
-         tz: str | None = None, view=None, notes=None) -> dict:
+         tz: str | None = None, view=None, notes=None,
+         zone_opacity: float | None = None, magnet_px: float | None = None) -> dict:
     """Assemble and validate a chart spec from flexible inputs.
 
     ``precision`` is the number of price decimals the viewer shows; when
@@ -443,7 +468,11 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
     how the viewer displays them; ``source`` ("ftmo"/"dukascopy") records where
     the bars came from. ``view`` (``{from, to}`` or a pair) is the time range the
     page opens on; without it the page opens fitted to every bar. ``notes`` are
-    data notes for the footer badge (see ``notes_from_rows``).
+    data notes for the footer badge (see ``notes_from_rows``). ``zone_opacity``
+    (0-1, viewer default 0.22) is the zones' fill; a zone's own ``opacity`` wins.
+    ``magnet_px`` (0-50, viewer default 6) is how close, in screen pixels, the
+    pointer must come to a candle's high, low or close for the crosshair to snap
+    to it; 0 leaves the crosshair free.
     """
     if not timeframes:
         raise ValueError("timeframes must not be empty")
@@ -496,6 +525,10 @@ def spec(symbol, timeframes: dict, *, exchange: str = "", period_label: str = ""
         out["view"] = norm_view(view)
     if notes:
         out["notes"] = notes_from_rows(notes)
+    if zone_opacity is not None:
+        out["zoneOpacity"] = _check_opacity(zone_opacity)
+    if magnet_px is not None:
+        out["magnetPx"] = _check_magnet(magnet_px)
     return out
 
 
@@ -571,6 +604,19 @@ def validate(s: dict) -> list:
             notes_from_rows(s["notes"])
         except (TypeError, ValueError) as exc:
             problems.append(str(exc))
+    for key, check in (("zoneOpacity", _check_opacity), ("magnetPx", _check_magnet)):
+        if s.get(key) is not None:
+            try:
+                check(s[key])
+            except ValueError as exc:
+                problems.append(str(exc))
+    for z in (s.get("overlay") or {}).get("zones") or []:
+        if isinstance(z, dict) and z.get("opacity") is not None:
+            try:
+                _check_opacity(z["opacity"], "zone opacity")
+            except ValueError as exc:
+                problems.append(str(exc))
+                break
 
     eq = s.get("equity")
     if eq:
@@ -639,6 +685,10 @@ def normalize(s: dict) -> dict:
         out["view"] = norm_view(s["view"])
     if s.get("notes"):
         out["notes"] = notes_from_rows(s["notes"])
+    if s.get("zoneOpacity") is not None:
+        out["zoneOpacity"] = _check_opacity(s["zoneOpacity"])
+    if s.get("magnetPx") is not None:
+        out["magnetPx"] = _check_magnet(s["magnetPx"])
     out["version"] = int(out.get("version") or SPEC_VERSION)
     out.setdefault("symbol", "Chart")
     out.setdefault("exchange", "")

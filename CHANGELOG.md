@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-13
+
+A free crosshair with a soft magnet, and clearer zone boxes (owner, engulfingCore session 28).
+
+### Changed
+
+- **Crosshair: free, with a soft magnet.** The viewer used lightweight-charts' Magnet mode, which pulled the
+  crosshair to the candle's close at all times ("the cross hair is sticking to the price close, need it to be
+  free so i can glance the area which price moves"). It now follows the pointer and snaps to the hovered
+  candle's high, low or close only when the pointer is within `magnetPx` screen pixels of one (default 6;
+  spec `magnetPx`, `chart.spec(..., magnet_px=)`, `?magnet=<px>`; `0` = never snaps). A **Magnet** box in the
+  toolbar turns the snap off and on (remembered). The status bar and the price-axis label show the snapped price.
+- **Zone boxes clearer.** The fill is a little more opaque (0.22, was 0.12; spec `zoneOpacity`,
+  `chart.spec(..., zone_opacity=)`, or a zone's own `opacity`), the border is drawn at 0.85 (was 0.6) and the
+  label solid. An `rgb(...)` / `rgba(...)` colour is now parsed: before, it was used unchanged for the fill,
+  the border and the label, so a zone handed in as `rgba(..., 0.16)` (engulfingCore's setup pages) had a border
+  and label as faint as its fill.
+
+### Added
+
+- `window.ChartLab.debug()` gives `crosshair` (`{time, y, pointer, price, snapped}`), `magnetPx`, `magnetOn`,
+  `zoneOpacity`, and each painted zone's `fill` / `line` colours. Tests: the snap through the chart's own mouse
+  handler (high / low / close within 6 px, free in between and 12 px off the close, `magnet_px=0`), the zone
+  alphas (rgba and hex colours, page and zone opacity), the new spec fields' checks.
+
 ## [0.4.0] - 2026-09-27
 
 FTMO bars and costs from priceData only (clean years, pre-clean years opt-in and labelled, costs

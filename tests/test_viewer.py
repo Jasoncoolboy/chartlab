@@ -417,5 +417,99 @@ class TestSetupPagesOffGrid(unittest.TestCase):
             self.assertEqual(len(out[tf]["painted"]["zones"]), 1, f"{tf}: zone not drawn")
 
 
+H1 = 3600
+# Moves the mouse over bar `i` to each pane y in `ys` (a JS expression list) through the chart's own mouse handler
+# (mouseenter once, then mousemove on the element under the point, as a real mouse does) and returns the viewer's crosshair state after each move,
+# with every setCrosshairPosition call (the snap) recorded.
+_MOVES = """
+var api=ChartLab.api(),c=api.chart,s=api.series,calls=[],orig=c.setCrosshairPosition.bind(c);
+c.setCrosshairPosition=function(p,t,se){calls.push([p,t]);return orig(p,t,se)};
+var d0=ChartLab.debug(),T=d0.first+%(i)d*3600,x=c.timeScale().timeToCoordinate(T);
+var H=%(high)r,L=%(low)r,C=%(close)r,yH=s.priceToCoordinate(H),yL=s.priceToCoordinate(L),yC=s.priceToCoordinate(C);
+var entered=false;
+function move(y){
+  var r=document.getElementById('chart').getBoundingClientRect(),cx=r.left+x,cy=r.top+y,el=document.elementFromPoint(cx,cy);
+  (entered?['mousemove']:['mouseenter','mousemove']).forEach(function(n){el.dispatchEvent(new MouseEvent(n,{clientX:cx,clientY:cy,bubbles:n==='mousemove',cancelable:true,view:window}))});
+  entered=true;
+  var q=ChartLab.debug().crosshair;return q?{price:q.price,pointer:q.pointer,snapped:q.snapped,time:q.time}:null;
+}
+var out=[%(ys)s].map(move);
+return {moves:out,calls:calls,T:T,yH:yH,yL:yL,yC:yC,magnetOn:ChartLab.debug().magnetOn,magnetPx:ChartLab.debug().magnetPx,
+        boxShown:document.getElementById('ckMagnet').closest('label').style.display!=='none'};
+"""
+
+
+def _wide_bars(n=60):
+    """H1 bars 200 pips high (close half-way between open and high), so high, close and low lie far apart on screen."""
+    return {"time": [T0 + i * H1 for i in range(n)], "open": [1.1000] * n, "high": [1.1100] * n,
+            "low": [1.0900] * n, "close": [1.1050] * n}
+
+
+@unittest.skipUnless(BROWSER, "no headless Edge/Chrome found (set CHARTLAB_BROWSER)")
+class TestSoftMagnet(unittest.TestCase):
+    """Owner 2026-10-13: the crosshair stuck to the close (lightweight-charts' Magnet mode). Now it is free and snaps to the
+    hovered candle's high / low / close only when the pointer is within magnetPx (default 6) pixels of one."""
+
+    def test_free_between_levels_snaps_near_high_low_close(self):
+        s = chart.spec("EURUSD", {"H1": _wide_bars()}, tz="UTC")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = run_page(_render(tmp, s), _MOVES % dict(i=30, high=1.11, low=1.09, close=1.105,
+                                                          ys="yH+3,(yC+yL)/2,yL-4,yC+2,yC-12"))
+        self.assertEqual(out["magnetPx"], 6)
+        self.assertTrue(out["magnetOn"] and out["boxShown"])
+        self.assertGreater(out["yL"] - out["yC"], 100, out)                 # the levels are far apart on screen
+        near_high, middle, near_low, near_close, off_close = out["moves"]
+        self.assertTrue(near_high["snapped"])
+        self.assertAlmostEqual(near_high["price"], 1.11, places=9)
+        self.assertTrue(near_low["snapped"])
+        self.assertAlmostEqual(near_low["price"], 1.09, places=9)
+        self.assertTrue(near_close["snapped"])
+        self.assertAlmostEqual(near_close["price"], 1.105, places=9)
+        for free in (middle, off_close):                                    # free: the price under the pointer
+            self.assertFalse(free["snapped"], free)
+            self.assertAlmostEqual(free["price"], free["pointer"], places=9)
+        self.assertTrue(1.09 < middle["price"] < 1.105, middle)
+        self.assertGreater(off_close["price"], 1.105)                       # 12 px above the close: not pulled to it
+        snaps = [round(p, 9) for p, _ in out["calls"]]                  # the library was told to snap (entering the pane
+        snaps = [p for i, p in enumerate(snaps) if i == 0 or snaps[i - 1] != p]   # fires mouseenter + mousemove: one snap twice)
+        self.assertEqual(snaps, [1.11, 1.09, 1.105])
+        self.assertTrue(all(t == out["T"] for _, t in out["calls"]))
+
+    def test_magnet_px_zero_leaves_it_free(self):
+        s = chart.spec("EURUSD", {"H1": _wide_bars()}, tz="UTC", magnet_px=0)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = run_page(_render(tmp, s), _MOVES % dict(i=30, high=1.11, low=1.09, close=1.105, ys="yH+1,yC,yL-1"))
+        self.assertFalse(out["magnetOn"])
+        self.assertFalse(out["boxShown"])
+        self.assertTrue(all(not m["snapped"] for m in out["moves"]), out["moves"])
+        self.assertEqual(out["calls"], [])
+
+
+@unittest.skipUnless(BROWSER, "no headless Edge/Chrome found (set CHARTLAB_BROWSER)")
+class TestZoneBoxes(unittest.TestCase):
+    """Owner 2026-10-13: the zone boxes were unclear. An rgba colour (engulfingCore passed rgba(..., 0.16)) used to be
+    drawn as it was for the fill, the border AND the label; now the fill takes the page's opacity (default 0.22) or the
+    zone's own, and the border is strong (0.85) whatever alpha the colour carries."""
+
+    def test_fill_and_border_alphas(self):
+        h1 = _wide_bars()
+        zones = [{"start": T0 + 5 * H1, "end": T0 + 40 * H1, "low": 1.095, "high": 1.105, "color": "rgba(41,98,255,0.16)",
+                  "label": "EG1"},
+                 {"start": T0 + 10 * H1, "end": T0 + 30 * H1, "low": 1.098, "high": 1.102, "color": "#ff9800",
+                  "opacity": 0.5, "label": "EG2"}]
+        probe = "return ChartLab.frame().then(function(){var d=ChartLab.debug();return {z:d.painted.zones,o:d.zoneOpacity}})"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = run_page(_render(tmp, chart.spec("EURUSD", {"H1": h1}, zones=zones, tz="UTC")), probe)
+            out3 = run_page(_render(tmp, chart.spec("EURUSD", {"H1": h1}, zones=zones, tz="UTC", zone_opacity=0.3),
+                                    "p3.html"), probe)
+        z = {q["i"]: q for q in out["z"]}
+        self.assertEqual(out["o"], 0.22)
+        self.assertEqual((z[0]["fill"], z[0]["line"]), ("rgba(41,98,255,0.22)", "rgba(41,98,255,0.85)"))
+        self.assertEqual((z[1]["fill"], z[1]["line"]), ("rgba(255,152,0,0.5)", "rgba(255,152,0,0.85)"))
+        z3 = {q["i"]: q for q in out3["z"]}
+        self.assertEqual(z3[0]["fill"], "rgba(41,98,255,0.3)")               # the page's opacity
+        self.assertEqual(z3[1]["fill"], "rgba(255,152,0,0.5)")               # a zone's own opacity wins
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -93,6 +93,7 @@ footer.st b{color:var(--text);font-weight:500}
     <div class="sep"></div>
     <label class="chk"><input type="checkbox" id="ckZones" checked>Zones</label>
     <label class="chk"><input type="checkbox" id="ckTrades" checked>Trades</label>
+    <label class="chk" title="Soft magnet: the crosshair moves freely and snaps to a candle's high, low or close only when the pointer is within a few pixels of it"><input type="checkbox" id="ckMagnet" checked>Magnet</label>
     <label class="chk" id="lblVol" style="display:none"><input type="checkbox" id="ckVol" checked>Volume</label>
     <label class="chk"><input type="checkbox" id="ckEq">Equity</label>
     <label class="chk" id="lblStats" style="display:none"><input type="checkbox" id="ckStats" checked>Metrics</label>
@@ -160,6 +161,8 @@ var PAL=["#2962ff","#e91e63","#7b1fa2","#00897b","#f4511e","#c0ca33","#5e35b1","
 var chart,series,volumeSeries,eqChart,eqSeries,canvas,ctx;
 var curTF=null,drawings=[],drawMode=null,drawBuf=null,indSeries=[];
 var PAINTED={zones:[],trades:[]};
+// Soft magnet (spec magnetPx, ?magnet=<px>, 0 = off) and the zone fill opacity (spec zoneOpacity, a zone's own opacity).
+var MAGNET_PX=6,magnetOn=true,CROSS=null,ZONE_FILL=0.22,ZONE_LINE=0.85;
 function $(id){return document.getElementById(id)}
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
 function b64bytes(v){var bin=atob(v||""),n=bin.length,u=new Uint8Array(n);for(var i=0;i<n;i++)u[i]=bin.charCodeAt(i);return u}
@@ -248,6 +251,11 @@ function usePayload(p){
   NOTES=(PAY.notes||[]).filter(function(n){return n&&n.text});
   defTF=PAY.defaultTimeframe||Object.keys(TFS)[0]||"D1";
   PREC=(typeof PAY.precision==="number"&&PAY.precision>=0&&PAY.precision<=8)?Math.floor(PAY.precision):inferPrec();
+  MAGNET_PX=(typeof PAY.magnetPx==="number"&&PAY.magnetPx>=0)?PAY.magnetPx:6;
+  try{var mq=new URLSearchParams(location.search).get("magnet");if(mq!==null&&mq!==""&&isFinite(+mq)&&+mq>=0)MAGNET_PX=+mq}catch(e){}
+  magnetOn=MAGNET_PX>0;
+  try{if(window.localStorage.getItem("chartlab.magnet")==="off")magnetOn=false}catch(e){}
+  ZONE_FILL=(typeof PAY.zoneOpacity==="number"&&PAY.zoneOpacity>=0&&PAY.zoneOpacity<=1)?PAY.zoneOpacity:0.22;
   candleCache={};indCalcCache={};drawerRendered=0;hoverTrade=null;
   OFF=0;TZNAME="UTC";setTZName(initTZ());
 }
@@ -257,14 +265,24 @@ function fmtT(t){
   var d=new Date(t*1000);
   return d.getUTCFullYear()+"-"+p2(d.getUTCMonth()+1)+"-"+p2(d.getUTCDate())+" "+p2(d.getUTCHours())+":"+p2(d.getUTCMinutes());
 }
+// A colour's red / green / blue from "#rgb", "#rrggbb", "rgb(...)" or "rgba(...)" (its own alpha is dropped: the caller
+// gives the alpha); null for anything else (a CSS name is then used as it is).
+function rgbOf(c){
+  var s=String(c==null?"":c).trim(),m;
+  if(s.charAt(0)==="#"){
+    var h=s.slice(1);
+    if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    if(!/^[0-9a-f]{6}$/i.test(h))return null;
+    return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];
+  }
+  m=/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*[\d.]+\s*)?\)$/i.exec(s);
+  return m?[Math.round(+m[1]),Math.round(+m[2]),Math.round(+m[3])]:null;
+}
+// The colour at alpha a. An rgba colour used to come back unchanged, so a zone handed in as rgba(...,0.16) drew its
+// border and label as faint as its fill (owner, 2026-10-13: "the boxes ... are kind of unclear").
 function hexA(h,a){
-  var raw=String(h||"#2962ff").trim();
-  if(raw.charAt(0)!=="#")return raw;
-  h=raw.slice(1);
-  if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
-  if(!/^[0-9a-f]{6}$/i.test(h))return raw;
-  var r=parseInt(h.substr(0,2),16),g=parseInt(h.substr(2,2),16),b=parseInt(h.substr(4,2),16);
-  return "rgba("+r+","+g+","+b+","+a+")";
+  var raw=String(h||"#2962ff").trim(),c=rgbOf(raw);
+  return c?"rgba("+c[0]+","+c[1]+","+c[2]+","+a+")":raw;
 }
 function init(){
   chart=LightweightCharts.createChart($("chart"),{
@@ -273,7 +291,8 @@ function init(){
     grid:{vertLines:{color:"#1e222d"},horzLines:{color:"#1e222d"}},
     rightPriceScale:{borderColor:"#2a2e39",scaleMargins:{top:0.06,bottom:0.06}},
     timeScale:{borderColor:"#2a2e39",timeVisible:true,secondsVisible:false,rightOffset:5,barSpacing:7,minBarSpacing:0.01,fixRightEdge:true,lockVisibleTimeRangeOnResize:true},
-    crosshair:{mode:1,vertLine:{color:"#758696",width:1,style:3,labelBackgroundColor:"#363c4e"},horzLine:{color:"#758696",width:1,style:3,labelBackgroundColor:"#363c4e"}},
+    // mode 0 = a free crosshair; onCrosshair adds the soft magnet (the library's Magnet mode pulled it to the close at all times)
+    crosshair:{mode:0,vertLine:{color:"#758696",width:1,style:3,labelBackgroundColor:"#363c4e"},horzLine:{color:"#758696",width:1,style:3,labelBackgroundColor:"#363c4e"}},
     handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},
     handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true},
     localization:{timeFormatter:function(t){return fmtT(t)}}
@@ -542,13 +561,30 @@ function applyRange(r){
   var ms=(r==="1m"?2592000e3:r==="3m"?7776000e3:r==="6m"?15552000e3:r==="1y"?31536000e3:0);
   if(ms)ts.setVisibleRange({from:last-ms,to:last+86400});
 }
+// Soft magnet (owner, 2026-10-13: "need it to be free so i can glance the area which price moves, the magnet effect is okay
+// if very close to the high or low or close"): the crosshair follows the pointer, and snaps to the hovered candle's high, low
+// or close only when the pointer is within MAGNET_PX pixels of one (the nearest wins). setCrosshairPosition fires no
+// crosshair event of its own, so this handler is not re-entered; the next pointer move frees the crosshair again.
+function magnetPrice(param){
+  if(!magnetOn||!(MAGNET_PX>0)||!series||!param||!param.point||param.time==null||!param.seriesData)return null;
+  var bar=param.seriesData.get(series);if(!bar)return null;
+  var y=param.point.y,best=null,bd=MAGNET_PX+1e-9,lv=[bar.high,bar.low,bar.close];
+  for(var i=0;i<lv.length;i++){
+    var yy=yPx(lv[i]);if(yy===null||yy===undefined)continue;
+    var dd=Math.abs(yy-y);if(dd<bd){bd=dd;best=lv[i]}
+  }
+  return best;
+}
 function onCrosshair(param){
   var stT=$("stT"),stP=$("stP"),stD=$("stD");
   if(!param.time||!param.point||!series){
-    stT.textContent="—";stP.textContent="—";stD.textContent="—";return;
+    CROSS=null;stT.textContent="—";stP.textContent="—";stD.textContent="—";return;
   }
   var bar=param.seriesData.get(series);
-  var px=pxY(param.point.y);
+  var free=pxY(param.point.y),snap=magnetPrice(param);
+  if(snap!==null){try{chart.setCrosshairPosition(snap,param.time,series)}catch(e){snap=null}}
+  var px=snap!==null?snap:free;
+  CROSS={time:param.time,y:param.point.y,pointer:free,price:px,snapped:snap!==null};
   stT.textContent=fmtT(param.time)+" "+TZNAME;
   stP.textContent=px===null?"—":fp(px);
   var txt=[];
@@ -715,14 +751,17 @@ function paintZones(v){
     if(xb<v.x0||xa>v.x1)return;
     var yh=yPx(z.high),yl=yPx(z.low);
     if(yh===null||yl===null)return;
-    var col=z.color||"#2962ff";
-    ctx.fillStyle=hexA(col,0.12);ctx.fillRect(xa,yh,xb-xa,yl-yh);
-    ctx.strokeStyle=hexA(col,0.6);ctx.lineWidth=1;ctx.strokeRect(xa+0.5,yh+0.5,xb-xa-1,yl-yh-1);
-    var pz={i:zi,xa:xa,xb:xb,yh:yh,yl:yl};
+    // Fill at the zone's own opacity or the page's (default 0.22, was 0.12); border and label strong whatever alpha the
+    // colour carries, so the box reads clearly.
+    var col=z.color||"#2962ff",fa=(typeof z.opacity==="number"&&z.opacity>=0&&z.opacity<=1)?z.opacity:ZONE_FILL;
+    var fill=hexA(col,fa),line=hexA(col,ZONE_LINE);
+    ctx.fillStyle=fill;ctx.fillRect(xa,yh,xb-xa,yl-yh);
+    ctx.strokeStyle=line;ctx.lineWidth=1;ctx.strokeRect(xa+0.5,yh+0.5,xb-xa-1,yl-yh-1);
+    var pz={i:zi,xa:xa,xb:xb,yh:yh,yl:yl,fill:fill,line:line};
     // The label starts at the box's visible left edge and is cut to the box (full text: status bar).
     var lx=Math.max(xa,0)+6,room=xb-lx-6;
     if(z.label&&room>=24&&yl-yh>24){
-      ctx.font="500 11px -apple-system,sans-serif";ctx.fillStyle=col;
+      ctx.font="500 11px -apple-system,sans-serif";ctx.fillStyle=hexA(col,1);
       var txt=fitText(z.label,room);
       if(txt){ctx.fillText(txt,lx,yh+14);pz.label=txt;pz.labelX=lx;pz.labelW=ctx.measureText(txt).width}
     }
@@ -819,6 +858,12 @@ function evPoint(e){
 }
 function bindUI(){
   $("ckZones").onchange=redraw;$("ckTrades").onchange=redraw;
+  $("ckMagnet").checked=magnetOn;
+  if(!(MAGNET_PX>0))$("ckMagnet").closest("label").style.display="none";
+  $("ckMagnet").onchange=function(){
+    magnetOn=$("ckMagnet").checked;
+    try{window.localStorage.setItem("chartlab.magnet",magnetOn?"on":"off")}catch(e){}
+  };
   $("ckVol").onchange=function(){if(volumeSeries)volumeSeries.applyOptions({visible:$("ckVol").checked})};
   $("ckStats").onchange=renderStats;
   $("btnTrades").onclick=function(){toggleDrawer()};
@@ -998,6 +1043,7 @@ function debug(){
     width:r.width,firstX:T.length?timeX(T[0]):null,lastX:T.length?timeX(T[T.length-1]):null,
     view:PAY.view||null,
     ready:true,zones:ZONES.length,trades:TRADES.length,
+    crosshair:CROSS,magnetPx:MAGNET_PX,magnetOn:magnetOn,zoneOpacity:ZONE_FILL,
     zonesOn:$("ckZones").checked,drawings:drawings.length,
     drawingList:drawings.map(function(d){return d;}),
     inds:defs.length,

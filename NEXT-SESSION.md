@@ -1,5 +1,16 @@
 # ChartLab — next session / handover
 
+## State (2026-10-13, v0.4.1)
+
+- **v0.4.1 (engulfingCore session 28, owner):** the crosshair is FREE with a soft magnet — it snaps to the hovered
+  candle's high / low / close only within `magnetPx` screen pixels (default 6; spec `magnetPx`, `chart.spec(magnet_px=)`,
+  `?magnet=<px>`, 0 = never; a remembered **Magnet** box in the toolbar). lightweight-charts' Magnet mode had pulled it to
+  the close at all times. Zone boxes clearer: fill 0.22 (was 0.12; spec `zoneOpacity`, a zone's own `opacity`), border
+  0.85, label solid, and `rgb(...)` / `rgba(...)` colours parsed (an rgba colour used to be drawn unchanged for fill,
+  border and label alike = the "unclear" boxes on engulfingCore's pages). **193 tests pass** (6 new: the snap through the
+  chart's own mouse handler, the zone alphas, the spec checks). Committed; pushed if the GitHub credentials answered
+  non-interactively (see the commit / `git status -sb`).
+
 ## State (2026-09-27)
 
 - Only `main` exists, **pushed to `origin` with tags `v0.3.0`** (the 2026-09-20 commit that set 0.3.0 — the tag was

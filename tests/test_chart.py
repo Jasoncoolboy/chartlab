@@ -138,6 +138,40 @@ class TestSpecAndValidate(unittest.TestCase):
         self.assertTrue(any("defaultTimeframe" in p for p in chart.validate(s)))
 
 
+class TestZoneOpacityAndMagnet(unittest.TestCase):
+    """2026-10-13: the zones' fill opacity (page default, a zone's own) and the soft magnet's reach."""
+
+    def test_zone_opacity_kept_and_checked(self):
+        z = chart.zones_from_rows([{"start": 1, "end": 2, "low": 1.0, "high": 2.0, "opacity": 0.4}])[0]
+        self.assertEqual(z["opacity"], 0.4)
+        self.assertNotIn("opacity", chart.zones_from_rows([{"start": 1, "end": 2, "low": 1, "high": 2}])[0])
+        for bad in (1.5, -0.1, "x"):
+            with self.assertRaises(ValueError):
+                chart.zones_from_rows([{"start": 1, "end": 2, "low": 1, "high": 2, "opacity": bad}])
+
+    def test_spec_carries_and_checks_page_options(self):
+        s = chart.spec("X", {"D1": _bars(3)}, zone_opacity=0.3, magnet_px=4)
+        self.assertEqual((s["zoneOpacity"], s["magnetPx"]), (0.3, 4.0))
+        self.assertEqual(chart.validate(s), [])
+        plain = chart.spec("X", {"D1": _bars(3)})
+        self.assertNotIn("zoneOpacity", plain)                 # the viewer's defaults apply
+        self.assertNotIn("magnetPx", plain)
+        self.assertEqual(chart.spec("X", {"D1": _bars(3)}, magnet_px=0)["magnetPx"], 0.0)   # 0 = free crosshair
+        with self.assertRaises(ValueError):
+            chart.spec("X", {"D1": _bars(3)}, zone_opacity=2)
+        with self.assertRaises(ValueError):
+            chart.spec("X", {"D1": _bars(3)}, magnet_px=-1)
+        s["magnetPx"] = 99
+        s["overlay"]["zones"] = [{"start": 1, "end": 2, "low": 1, "high": 2, "opacity": 3}]
+        problems = chart.validate(s)
+        self.assertTrue(any("magnetPx" in p for p in problems))
+        self.assertTrue(any("zone opacity" in p for p in problems))
+
+    def test_normalize_carries_page_options(self):
+        s = chart.normalize({"timeframes": {"D1": _bars(3)}, "zoneOpacity": "0.5", "magnetPx": 8})
+        self.assertEqual((s["zoneOpacity"], s["magnetPx"]), (0.5, 8.0))
+
+
 class TestRender(unittest.TestCase):
     def test_render_writes_page_and_lib(self):
         s = chart.spec("XAUUSD", {"D1": _bars(3)}, period_label="D1 · XAUUSD")

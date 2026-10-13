@@ -35,6 +35,8 @@ or programmatically with `chart.validate(spec)` (returns a list of problems; emp
 | `source`           | string            | no       | Where the bars came from: `"ftmo"` or `"dukascopy"` (informational; set by the adapters). |
 | `view`             | object            | no       | `{ "from": time, "to": time }` (UTC): the time range the page opens on. Without it the page opens fitted to every bar of `defaultTimeframe`. Setup pages set it to their pre/post window. `Fit` / double-click still shows every bar. |
 | `notes`            | list              | no       | Data notes: what the bars are and how they were checked. Each is text or `{ "level": "info" \| "warn", "text": … }`. The footer shows a badge — `✓ Data`, or amber `⚠ Data: N warnings` when one warns — and clicking it lists them. `pricedata.build_spec` and the `rows`/`setup` commands write them (priceData's verification, the M1 check, pre-clean years). |
+| `zoneOpacity`      | float 0–1         | no       | Fill opacity of the zones (default `0.22`); a zone's own `opacity` wins. The border is drawn at 0.85 and the label solid, whatever alpha the zone's colour carries. |
+| `magnetPx`         | float 0–50        | no       | The crosshair is free; it snaps to the hovered candle's high, low or close when the pointer is within this many screen pixels of one (default `6`; `0` = never snaps, and the toolbar's **Magnet** box is hidden). `?magnet=<px>` in the URL overrides it. |
 | `precision`        | int 0–8           | no       | Price decimals shown on the axis, legends and trade labels, and the scale compact encoding uses. Inferred from the bars when absent (`spec()`/`normalize()` write it; the viewer infers it for hand-written or loader specs): 5 for 5-digit FX, 3 for JPY, 2 for gold, never below 2. Set it explicitly only to show fewer or more digits than the data has. |
 
 The chart opens on `defaultTimeframe` and switches between the provided timeframes
@@ -103,7 +105,8 @@ A shaded rectangle spanning two times and two prices.
 | `low`   | float  | yes      | |
 | `high`  | float  | yes      | |
 | `label` | string | no       | Drawn inside the rectangle, cut to its width with `…`; the full text shows in the status bar when the cursor is inside the zone. |
-| `color` | string | no       | CSS hex, e.g. `"#f5c542"`. |
+| `color` | string | no       | CSS hex (`"#f5c542"`) or `rgb(...)` / `rgba(...)` (its alpha is not used: the fill takes the opacity below, the border 0.85). |
+| `opacity` | float 0–1 | no    | This zone's fill opacity; else the page's `zoneOpacity`, else 0.22. |
 
 Aliases: `from`/`to` for `start`/`end`, `lo`/`bottom` for `low`, `hi`/`top` for `high`.
 

@@ -65,8 +65,12 @@ refused, and a frame already converted to UTC is never converted twice.
 - **MYT / UTC display switch** (see above).
 - Prices at the instrument's own precision — 5-digit FX, 3-digit JPY, 2-digit gold —
   inferred from the bars, or set with the spec's `precision` field.
+- A **free crosshair with a soft magnet**: it follows the pointer, and snaps to the candle's high, low
+  or close only when the pointer comes within a few pixels of one (spec `magnetPx`, default 6; `?magnet=0`
+  in the URL or the **Magnet** box in the toolbar turns the snap off; the box is remembered).
 - Trades (entry/exit, SL/TP, P/L in `$`, `R` or pips) and rectangular **zones** drawn on the price
-  axis. A trade or zone time that is not a bar of the timeframe on screen (an M1 fill on an M15
+  axis (fill opacity: spec `zoneOpacity`, default 0.22, or a zone's own `opacity`; the border stays
+  strong whatever alpha the zone's colour carries). A trade or zone time that is not a bar of the timeframe on screen (an M1 fill on an M15
   page, an M15 entry on the H1 button) is drawn at the bar that contains it. Zone labels are cut
   to the box; the full label shows in the status bar under the cursor.
 - Provider indicators (SMA / EMA / Bollinger / RSI / MACD) as toggle chips — never user-added.
@@ -249,7 +253,7 @@ or in Python: `setups.setups_from_rows(rows, "M15", clock="ftmo", symbol="EURUSD
 | `entry_price` (`entry`, `price`) | required | |
 | `arm` (`trigger_time`, `time`) | | centres the window; default = entry time |
 | `stop` (`sl`), `target` (`tp`) | | a long stop must be below the entry, target above (reverse for shorts) — otherwise the row is refused |
-| `zone` (`zones`) | | one zone or a list: `start`, `end`, `low`, `high`, optional `label`, `color` |
+| `zone` (`zones`) | | one zone or a list: `start`, `end`, `low`, `high`, optional `label`, `color`, `opacity` |
 | `label`, `id` (`ref`), `symbol`, `lots` | | ids become file names; duplicates are refused |
 | `exit_time`, `exit_price`, `net`, `reason` | | draws the outcome when present |
 | `net_unit` (`netUnit`) | | unit of `net`: `$` (default), `R` or `pips` — so −1.07 R reads `−1.07R`, not `−$1` |
