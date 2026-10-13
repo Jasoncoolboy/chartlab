@@ -8,8 +8,8 @@
   the close at all times. Zone boxes clearer: fill 0.22 (was 0.12; spec `zoneOpacity`, a zone's own `opacity`), border
   0.85, label solid, and `rgb(...)` / `rgba(...)` colours parsed (an rgba colour used to be drawn unchanged for fill,
   border and label alike = the "unclear" boxes on engulfingCore's pages). **193 tests pass** (6 new: the snap through the
-  chart's own mouse handler, the zone alphas, the spec checks). Committed; pushed if the GitHub credentials answered
-  non-interactively (see the commit / `git status -sb`).
+  chart's own mouse handler, the zone alphas, the spec checks). Committed and pushed (`418ee2a`,
+  2026-10-13, once the owner had signed in to GitHub on this PC).
 
 ## State (2026-09-27)
 
