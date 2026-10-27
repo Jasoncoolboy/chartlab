@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root{--bg:#0e1117;--panel:#131722;--panel2:#1e222d;--border:#2a2e39;--text:#d1d4dc;--muted:#787b86;--up:#26a69a;--down:#ef5350;--acc:#2962ff}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}
+#app{display:flex;flex-direction:column;height:100vh}
+header.tb{flex:0 0 auto;background:var(--panel);border-bottom:1px solid var(--border);user-select:none}
+.tbrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:5px 10px;min-height:40px}
+.tbrow+.tbrow{border-top:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600}
+.brand .lg{width:20px;height:20px;background:var(--acc);border-radius:4px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;flex:0 0 auto}
+.brand .sy{font-size:15px;letter-spacing:.3px}
+.brand .ex{color:var(--muted);font-size:11px;font-weight:400}
+.sep{width:1px;height:22px;background:var(--border);flex:0 0 auto}
+button.tb{background:transparent;border:1px solid transparent;color:var(--text);font-size:12px;padding:4px 10px;border-radius:4px;cursor:pointer;white-space:nowrap;font-family:inherit}
+button.tb:hover{background:var(--panel2)}
+button.tb.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+button.tb.active{background:var(--panel2);border-color:var(--acc);color:#fff}
+label.chk{display:flex;align-items:center;gap:6px;color:var(--muted);cursor:pointer;white-space:nowrap;font-size:12px}
+input[type=checkbox]{accent-color:var(--acc)}
+.flex{flex:1}
+#chartWrap{position:relative;flex:1 1 100%;min-height:0;background:var(--panel)}
+#eqWrap{position:relative;flex:0 0 170px;min-height:0;border-top:1px solid var(--border);background:#0e1117;display:flex;flex-direction:column}
+#eqWrap.hide{display:none}
+#eqTitle{flex:0 0 auto;font-size:11px;color:var(--muted);padding:2px 10px 0;user-select:none}
+#eqC{flex:1;position:relative}
+#chart,#eqC>div{width:100%;height:100%}
+#overlay{position:absolute;inset:0;pointer-events:none;z-index:5}
+#overlay.drawing{pointer-events:auto;cursor:crosshair}
+#legend{position:absolute;left:10px;top:8px;z-index:6;pointer-events:none;font-size:11px;line-height:1.55}
+#legend .l1{font-size:12px;font-weight:600}
+#legend .l1 .s2{color:var(--muted);font-weight:400;margin-left:5px}
+#legend .l1 .tf{color:var(--acc);margin-left:10px}
+#legend .vals span{margin-right:12px;display:inline-block}
+#legend .vals .o{color:var(--muted)}
+#legend .vals .h{color:var(--down)}
+#legend .vals .l{color:var(--up)}
+#legend .vals .c.up{color:var(--up)}
+#legend .vals .c.dn{color:var(--down)}
+#legend .vals .ch{color:var(--muted)}
+.chips{display:flex;gap:5px;flex-wrap:wrap;max-width:420px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.07);padding:1px 8px;border-radius:10px;font-size:11px;white-space:nowrap;cursor:pointer;border:1px solid transparent}
+.chip i{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.chip.off{opacity:.45;border-color:var(--border)}
+footer.st{flex:0 0 auto;height:26px;background:var(--panel);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 10px;font-size:11px;color:var(--muted);gap:16px;user-select:none;overflow:hidden;white-space:nowrap}
+footer.st b{color:var(--text);font-weight:500}
+.lblpos{color:var(--muted);font-size:11px}
+#stats{position:absolute;right:10px;top:8px;z-index:6;background:rgba(19,23,34,.88);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:11px;pointer-events:none;min-width:160px}
+#stats.hide{display:none}
+#stats .h{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+#stats .r{display:flex;justify-content:space-between;gap:18px;line-height:1.65}
+#stats .r .k{color:var(--muted)}
+#stats .r .v{font-weight:600;font-variant-numeric:tabular-nums}
+#stats .v.up{color:var(--up)}#stats .v.down{color:var(--down)}
+#chartWrap.drawerOpen #stats{right:382px}
+#drawer{position:absolute;right:0;top:0;bottom:0;width:370px;max-width:82%;background:rgba(19,23,34,.97);border-left:1px solid var(--border);z-index:9;display:flex;flex-direction:column}
+#drawer.hide{display:none}
+#drawer .dh{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600}
+#drawer .dx{background:transparent;border:none;color:var(--muted);font-size:16px;cursor:pointer;line-height:1;padding:0 4px}
+#drawer .dx:hover{color:var(--text)}
+#drawerBody{flex:1 1 auto;overflow:auto;font-size:11px}
+#drawerBody .tr{display:flex;gap:8px;align-items:center;padding:5px 10px;border-bottom:1px solid rgba(42,46,57,.5);cursor:pointer;white-space:nowrap}
+#drawerBody .tr:hover{background:rgba(255,255,255,.04)}
+#drawerBody .tr .d{font-weight:700;width:12px;flex:0 0 auto}
+#drawerBody .tr .d.up{color:var(--up)}#drawerBody .tr .d.down{color:var(--down)}
+#drawerBody .tr .tm{color:var(--muted);width:112px;flex:0 0 auto}
+#drawerBody .tr .px{flex:1 1 auto;font-variant-numeric:tabular-nums}
+#drawerBody .tr .nt{font-variant-numeric:tabular-nums;flex:0 0 auto}
+#drawerBody .tr .nt.up{color:var(--up)}#drawerBody .tr .nt.down{color:var(--down)}
+#drawerBody .more,#drawerBody .empty{padding:10px;color:var(--muted)}
+#stNotes{cursor:pointer;padding:0 8px;border-radius:9px;border:1px solid var(--border);line-height:17px}
+#stNotes.ok{color:var(--up)}
+#stNotes.warn{color:#f5a623;border-color:rgba(245,166,35,.55)}
+#notesPanel{position:absolute;right:10px;bottom:8px;z-index:8;max-width:min(620px,90%);background:rgba(19,23,34,.97);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:11px;line-height:1.5}
+#notesPanel.hide{display:none}
+#notesPanel .n{display:flex;gap:7px;padding:2px 0}
+#notesPanel .n i{font-style:normal;flex:0 0 auto}
+#notesPanel .n.warn i{color:#f5a623}#notesPanel .n.info i{color:var(--up)}
+@media print{body{overflow:visible}header.tb,footer.st,#drawer{display:none!important}#app{height:auto}#chartWrap{height:80vh}}
+</style>
+</head>
+<body>
+<div id="app">
+<header class="tb">
+  <div class="tbrow">
+    <div class="brand"><div class="lg">CL</div><div><div class="sy" id="syTitle">Chart</div><div class="ex" id="exSub"></div></div></div>
+    <div class="sep"></div>
+    <label class="chk"><input type="checkbox" id="ckZones" checked>Zones</label>
+    <label class="chk"><input type="checkbox" id="ckTrades" checked>Trades</label>
+    <label class="chk" title="Soft magnet: the crosshair moves freely and snaps to a candle's high, low or close only when the pointer is within a few pixels of it"><input type="checkbox" id="ckMagnet" checked>Magnet</label>
+    <label class="chk" id="lblVol" style="display:none"><input type="checkbox" id="ckVol" checked>Volume</label>
+    <label class="chk"><input type="checkbox" id="ckEq">Equity</label>
+    <label class="chk" id="lblStats" style="display:none"><input type="checkbox" id="ckStats" checked>Metrics</label>
+    <button class="tb" id="btnTrades" style="display:none">Trades</button>
+    <div class="flex"></div>
+    <button class="tb" data-r="1m">1M</button>
+    <button class="tb" data-r="3m">3M</button>
+    <button class="tb" data-r="6m">6M</button>
+    <button class="tb" data-r="1y">1Y</button>
+    <button class="tb" data-r="all">All</button>
+    <div class="sep"></div>
+    <span class="lblpos" title="Chart data is always UTC; this only changes how times are displayed">Time</span>
+    <button class="tb" data-tz="MYT" title="Malaysian time, UTC+8">MYT</button>
+    <button class="tb" data-tz="UTC" title="UTC">UTC</button>
+    <div class="sep"></div>
+    <button class="tb" id="btnFit">Fit</button>
+    <button class="tb" id="btnClearDrw">Clear drawings</button>
+  </div>
+  <div class="tbrow">
+    <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center" id="tfBtns"></div>
+    <div class="sep"></div>
+    <div style="display:flex;gap:4px;align-items:center" id="drawTools">
+      <button class="tb active" data-tool="hand">Hand</button>
+      <button class="tb" data-tool="rect">Rectangle</button>
+      <button class="tb" data-tool="hline">Horizontal line</button>
+    </div>
+    <div class="flex"></div>
+    <div class="chips" id="indChips"></div>
+    <span class="lblpos" id="hint">Hand: drag=pan · scroll=zoom · dbl-click=fit</span>
+  </div>
+</header>
+<div id="chartWrap">
+  <div id="chart"></div>
+  <canvas id="overlay"></canvas>
+  <div id="legend"></div>
+  <div id="stats" class="hide"></div>
+  <div id="drawer" class="hide">
+    <div class="dh"><span id="drawerTitle">Trades</span><span class="flex"></span><button class="dx" id="drawerClose">&times;</button></div>
+    <div id="drawerBody"></div>
+  </div>
+  <div id="notesPanel" class="hide"></div>
+</div>
+<div id="eqWrap" class="hide">
+  <div id="eqTitle">Equity curve</div>
+  <div id="eqC"></div>
+</div>
+<footer class="st">
+  <span>Bar: <b id="stT">—</b> <b id="stP">—</b></span>
+  <span id="stD">—</span>
+  <span class="flex"></span>
+  <span id="stNotes" style="display:none" title="Data notes"></span>
+  <span id="stFt">offline</span>
+</footer>
+</div>
+<script src="__LIB__"></script>
+<script id="payload" type="application/json">__DATA__</script>
+<script>
+(function(){
+"use strict";
+var PAY={},SYM="Chart",TFS={},TRADES=[],ZONES=[],EQ=null,INDS={},STATS=[],NOTES=[],defTF="D1",PREC=2;
+var TZS={"UTC":0,"MYT":28800},TZLABEL={"UTC":"UTC","MYT":"MYT (UTC+8)"},TZNAME="UTC",OFF=0;
+var SPEC_URL=__SPEC_URL__;
+var candleCache={},indCalcCache={},drawerRendered=0,hoverTrade=null;
+var PAL=["#2962ff","#e91e63","#7b1fa2","#00897b","#f4511e","#c0ca33","#5e35b1","#00acc1"];
+var chart,series,volumeSeries,eqChart,eqSeries,canvas,ctx;
+var curTF=null,drawings=[],drawMode=null,drawBuf=null,indSeries=[];
+var PAINTED={zones:[],trades:[]};
+// Soft magnet (spec magnetPx, default 20 px since 0.4.2, ?magnet=<px>, 0 = off) and the zone fill opacity (spec zoneOpacity, a zone's own opacity).
+var MAGNET_PX=20,magnetOn=true,CROSS=null,ZONE_FILL=0.22,ZONE_LINE=0.85;
+function $(id){return document.getElementById(id)}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function b64bytes(v){var bin=atob(v||""),n=bin.length,u=new Uint8Array(n);for(var i=0;i<n;i++)u[i]=bin.charCodeAt(i);return u}
+function decInts(v,signed){
+  var u=b64bytes(v),dv=new DataView(u.buffer,u.byteOffset,u.byteLength),n=u.byteLength>>2,a=new Array(n);
+  for(var i=0;i<n;i++)a[i]=signed?dv.getInt32(i*4,true):dv.getUint32(i*4,true);
+  return a;
+}
+function decodeBlock(b){
+  if(!b||!b.t)return b;
+  var o={time:decInts(b.t,false)},pairs=[["o","open"],["h","high"],["l","low"],["c","close"]];
+  var sc=b.s||1e4;
+  pairs.forEach(function(pr){if(b[pr[0]]!=null){var a=decInts(b[pr[0]],true);for(var i=0;i<a.length;i++)a[i]=a[i]/sc;o[pr[1]]=a}});
+  if(b.v)o.volume=b.v;
+  return o;
+}
+function inferPrec(){
+  var need=2,k,c,i,a,v,tol;
+  for(k in TFS){
+    var d=TFS[k];if(!d)continue;
+    var cols=[d.open,d.high,d.low,d.close];
+    for(c=0;c<4;c++){
+      a=cols[c]||[];
+      for(i=0;i<a.length;i++){
+        v=a[i];if(v===null||v===undefined||!isFinite(v))continue;
+        tol=1e-9*Math.max(1,Math.abs(v));
+        while(need<8&&Math.abs(+v.toFixed(need)-v)>tol)need++;
+        if(need>=8)return 8;
+      }
+    }
+  }
+  return need;
+}
+function fp(x){return Number(x).toFixed(PREC)}
+function priceFmt(prec){var p=(prec===undefined)?PREC:prec;return {type:"price",precision:p,minMove:1/Math.pow(10,p)}}
+function shiftTimes(d){
+  if(!d)return;
+  var k,i,a;
+  for(k in TFS){a=TFS[k].time;for(i=0;i<a.length;i++)a[i]+=d}
+  TRADES.forEach(function(t){t.entryTime+=d;if(t.exitTime!==undefined&&t.exitTime!==null)t.exitTime+=d});
+  ZONES.forEach(function(z){z.start+=d;z.end+=d});
+  if(EQ)EQ.forEach(function(e){e.time+=d});
+  drawings.forEach(function(g){if(g.t1!=null)g.t1+=d;if(g.t2!=null)g.t2+=d});
+  candleCache={};
+}
+function setTZName(name){
+  if(!TZS.hasOwnProperty(name))name="MYT";
+  shiftTimes(TZS[name]-OFF);OFF=TZS[name];TZNAME=name;
+}
+function initTZ(){
+  var q=null,st=null;
+  try{q=new URLSearchParams(location.search).get("tz")}catch(e){}
+  try{st=window.localStorage.getItem("chartlab.tz")}catch(e){}
+  var c=[q,st,PAY.tz,"MYT"];
+  for(var i=0;i<c.length;i++){var u=c[i]&&String(c[i]).toUpperCase();if(u&&TZS.hasOwnProperty(u))return u}
+  return "MYT";
+}
+function paintTZ(){
+  var b=document.querySelectorAll("[data-tz]");
+  for(var i=0;i<b.length;i++)b[i].classList.toggle("on",b[i].dataset.tz===TZNAME);
+  $("exSub").textContent=[PAY.exchange,PAY.periodLabel,TZLABEL[TZNAME]].filter(Boolean).join(" · ");
+  $("stFt").textContent=[PAY.exchange||"offline",TZLABEL[TZNAME],"offline"].join(" · ");
+}
+function switchTZ(name){
+  if(name===TZNAME||!TZS.hasOwnProperty(name))return;
+  var vr=null;try{vr=chart.timeScale().getVisibleRange()}catch(e){}
+  var d=TZS[name]-OFF;
+  setTZName(name);
+  try{window.localStorage.setItem("chartlab.tz",name)}catch(e){}
+  setTF(curTF,false);                      // the shifted window is restored just below
+  if(eqSeries)eqSeries.setData(EQ);
+  if(vr){try{chart.timeScale().setVisibleRange({from:vr.from+d,to:vr.to+d})}catch(e){}}
+  drawerRendered=0;$("drawerBody").innerHTML="";
+  if(!$("drawer").classList.contains("hide"))renderDrawerChunk();
+  paintTZ();defaultLegend();redraw();
+}
+function usePayload(p){
+  PAY=p||{};SYM=PAY.symbol||"Chart";
+  TFS={};var tfs=PAY.timeframes||{},k;
+  for(k in tfs)if(Object.prototype.hasOwnProperty.call(tfs,k))TFS[k]=decodeBlock(tfs[k])||tfs[k];
+  TRADES=(PAY.overlay&&PAY.overlay.trades)||[];
+  ZONES=(PAY.overlay&&PAY.overlay.zones)||[];
+  // review-presentation-v1
+  var palette={"MN": "#ce9bff", "W1": "#6f9dff", "D1": "#42cddd", "H4": "#f4bd62", "H1": "#ed8fae", "M30": "#b7d46c", "M15": "#65d3ad", "M5": "#c3cad8"}, refs={};
+  ZONES.forEach(function(z){
+    if(/^Screenshot/.test(z.label||'')){
+      z.reviewReference=true;z.color='#e8b562';z.opacity=0;
+      var price=(z.low+z.high)/2,key=Object.keys(refs).find(function(k){return Math.abs(Number(k)-price)<.02});
+      if(key!==undefined&&refs[key]!==null){z.start=refs[key];z.end=z.start+3600;}
+      else{z.end=z.start+3600;}
+      z.label='Screenshot ~'+price.toFixed(2)+' · timing unverified';
+    }else{
+      var tf=(z.label||'').match(/\b(MN|W1|D1|H4|H1|M30|M15|M5)\b/);
+      if(tf)z.color=palette[tf[1]];
+      if(z.opacity!==0)z.opacity=.06;
+    }
+  });
+  EQ=(PAY.equity&&PAY.equity.time&&PAY.equity.time.length)?PAY.equity.time.map(function(tt,i){return {time:tt,value:PAY.equity.value[i]}}):null;
+  INDS=PAY.indicators||{};
+  STATS=PAY.stats||[];
+  NOTES=(PAY.notes||[]).filter(function(n){return n&&n.text});
+  defTF=PAY.defaultTimeframe||Object.keys(TFS)[0]||"D1";
+  PREC=(typeof PAY.precision==="number"&&PAY.precision>=0&&PAY.precision<=8)?Math.floor(PAY.precision):inferPrec();
+  MAGNET_PX=(typeof PAY.magnetPx==="number"&&PAY.magnetPx>=0)?PAY.magnetPx:20;
+  try{var mq=new URLSearchParams(location.search).get("magnet");if(mq!==null&&mq!==""&&isFinite(+mq)&&+mq>=0)MAGNET_PX=+mq}catch(e){}
+  magnetOn=MAGNET_PX>0;
+  try{if(window.localStorage.getItem("chartlab.magnet")==="off")magnetOn=false}catch(e){}
+  ZONE_FILL=(typeof PAY.zoneOpacity==="number"&&PAY.zoneOpacity>=0&&PAY.zoneOpacity<=1)?PAY.zoneOpacity:0.22;
+  candleCache={};indCalcCache={};drawerRendered=0;hoverTrade=null;
+  OFF=0;TZNAME="UTC";setTZName(initTZ());
+}
+function p2(n){return n<10?"0"+n:""+n}
+function fmtT(t){
+  if(t===null||t===undefined)return "—";
+  var d=new Date(t*1000);
+  return d.getUTCFullYear()+"-"+p2(d.getUTCMonth()+1)+"-"+p2(d.getUTCDate())+" "+p2(d.getUTCHours())+":"+p2(d.getUTCMinutes());
+}
+// A colour's red / green / blue from "#rgb", "#rrggbb", "rgb(...)" or "rgba(...)" (its own alpha is dropped: the caller
+// gives the alpha); null for anything else (a CSS name is then used as it is).
+function rgbOf(c){
+  var s=String(c==null?"":c).trim(),m;
+  if(s.charAt(0)==="#"){
+    var h=s.slice(1);
+    if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    if(!/^[0-9a-f]{6}$/i.test(h))return null;
+    return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];
+  }
+  m=/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*[\d.]+\s*)?\)$/i.exec(s);
+  return m?[Math.round(+m[1]),Math.round(+m[2]),Math.round(+m[3])]:null;
+}
+// The colour at alpha a. An rgba colour used to come back unchanged, so a zone handed in as rgba(...,0.16) drew its
+// border and label as faint as its fill (owner, 2026-10-13: "the boxes ... are kind of unclear").
+function hexA(h,a){
+  var raw=String(h||"#2962ff").trim(),c=rgbOf(raw);
+  return c?"rgba("+c[0]+","+c[1]+","+c[2]+","+a+")":raw;
+}
+function init(){
+  chart=LightweightCharts.createChart($("chart"),{
+    autoSize:false,
+    layout:{background:{type:"solid",color:"#131722"},textColor:"#d1d4dc",fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif',fontSize:11},
+    grid:{vertLines:{visible:false},horzLines:{visible:false}},
+    rightPriceScale:{borderColor:"#2a2e39",scaleMargins:{top:0.06,bottom:0.06}},
+    timeScale:{borderColor:"#2a2e39",timeVisible:true,secondsVisible:false,rightOffset:5,barSpacing:7,minBarSpacing:0.01,fixRightEdge:false,fixLeftEdge:false,lockVisibleTimeRangeOnResize:true},
+    // mode 0 = a free crosshair; onCrosshair adds the soft magnet (the library's Magnet mode pulled it to the close at all times)
+    crosshair:{mode:0,vertLine:{color:"#758696",width:1,style:3,labelBackgroundColor:"#363c4e"},horzLine:{color:"#758696",width:1,style:3,labelBackgroundColor:"#363c4e"}},
+    handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},
+    handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:true},
+    localization:{timeFormatter:function(t){return fmtT(t)}}
+  });
+  $("syTitle").textContent=SYM;
+  paintTZ();
+  $("lblStats").style.display=STATS.length?"":"none";
+  renderStats();
+  renderNotes();
+  $("btnTrades").style.display=TRADES.length?"":"none";
+  if(EQ){
+    eqChart=LightweightCharts.createChart($("eqC"),{autoSize:false,layout:{background:{type:"solid",color:"#0e1117"},textColor:"#787b86",fontSize:10},grid:{vertLines:{visible:false},horzLines:{visible:false}},rightPriceScale:{borderColor:"#2a2e39"},timeScale:{visible:false},crosshair:{mode:0}});
+    eqSeries=eqChart.addAreaSeries({lineColor:"#2962ff",topColor:"rgba(41,98,255,0.22)",bottomColor:"rgba(41,98,255,0)",lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+    eqSeries.setData(EQ);
+    eqChart.timeScale().fitContent();
+    $("ckEq").onchange=function(){
+      var on=$("ckEq").checked;
+      $("eqWrap").classList.toggle("hide",!on);
+      if(on)eqChart.timeScale().fitContent();
+    };
+  }else{$("ckEq").closest("label").style.display="none"}
+  canvas=$("overlay");                     // input layer for the drawing tools; ctx is the chart's, per frame
+  buildTF();
+  bindUI();
+  chart.subscribeCrosshairMove(onCrosshair);
+  chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
+  setTF(defTF);
+  // Open on the spec's view (else fit every bar) and re-apply it until the chart's width has
+  // settled: a view applied before the final layout keeps the default 7 px bar spacing, which
+  // left a short setup window squeezed into the right part of the chart.
+  function openView(){
+    var ts=chart.timeScale(),vw=PAY.view;
+    if(vw&&vw.from!=null&&vw.to!=null){try{ts.setVisibleRange({from:vw.from+OFF,to:vw.to+OFF});return}catch(e){}}
+    ts.fitContent();
+  }
+  var fitUntil=Date.now()+5000,fitTimer=null,fitW=-1,fitStable=0;
+  function initialFit(){if(window.ValkNavigationActive)return;
+    if(Date.now()>fitUntil)return;
+    fitCanvas();
+    var w=Math.round($("chart").getBoundingClientRect().width);
+    if(w!==fitW){fitW=w;fitStable=0}else fitStable++;
+    openView();
+    if(fitStable<3)fitTimer=setTimeout(initialFit,60);
+  }
+  ["pointerdown","wheel","touchstart","keydown"].forEach(function(ev){
+    $("chart").addEventListener(ev,function(){fitUntil=0;clearTimeout(fitTimer)},{passive:true});
+  });
+  initialFit();
+}
+function buildTF(){
+  var el=$("tfBtns");el.innerHTML="";
+  Object.keys(TFS).forEach(function(tf){
+    var b=document.createElement("button");b.className="tb";b.textContent=tf;
+    b.onclick=function(){setTF(tf)};
+    el.appendChild(b);
+  });
+}
+function candleData(tf){
+  if(candleCache[tf])return candleCache[tf];
+  var d=TFS[tf];
+  var out=new Array(d.time.length);
+  for(var i=0;i<d.time.length;i++)out[i]={time:d.time[i],open:d.open[i],high:d.high[i],low:d.low[i],close:d.close[i]};
+  candleCache[tf]=out;
+  return out;
+}
+function volumeData(tf){
+  var d=TFS[tf];if(!d||!d.volume)return null;
+  var out=new Array(d.time.length);
+  for(var i=0;i<d.time.length;i++)out[i]={time:d.time[i],value:d.volume[i],
+    color:(d.close[i]>=d.open[i])?"rgba(38,166,154,0.45)":"rgba(239,83,80,0.45)"};
+  return out;
+}
+// A timeframe switch keeps the TIME window on screen. The chart keeps the logical (bar-number)
+// range across a data change, so bars 40-160 of M15 used to become bars 40-160 of H1: a
+// different window. The new timeframe opens on the bars containing the old window's edges,
+// at least KEEP_MIN_BARS wide; a window outside its bars falls back to showing every bar.
+var KEEP_MIN_BARS=20;
+function keepWindow(vr){
+  var a=TFS[curTF].time,n=a.length;
+  if(!n||!vr||vr.to<a[0]||vr.from>=a[n-1]+barStep(a))return false;
+  var i0=vr.from<a[0]?0:barAt(vr.from),i1=barAt(vr.to);
+  if(i1<0)i1=n-1;
+  var mid=(i0+i1)/2,half=Math.max((i1-i0)/2,KEEP_MIN_BARS/2);
+  chart.timeScale().setVisibleLogicalRange({from:mid-half,to:mid+half});
+  return true;
+}
+function setTF(tf,keep){
+  if(!TFS[tf])return;
+  var vr=null;
+  if(keep!==false&&series&&curTF){try{vr=chart.timeScale().getVisibleRange()}catch(e){}}
+  curTF=tf;
+  var btns=$("tfBtns").children;
+  for(var i=0;i<btns.length;i++)btns[i].classList.toggle("on",btns[i].textContent===tf);
+  if(series)chart.removeSeries(series);
+  if(volumeSeries){chart.removeSeries(volumeSeries);volumeSeries=null;}
+  series=chart.addCandlestickSeries({
+    upColor:"#26a69a",downColor:"#ef5350",borderUpColor:"#26a69a",borderDownColor:"#ef5350",wickUpColor:"#26a69a",wickDownColor:"#ef5350",
+    priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:true,crosshairMarkerRadius:3,
+    priceFormat:priceFmt()
+  });
+  series.setData(candleData(tf));
+  series.attachPrimitive(new OverlayPrimitive());
+  var vd=volumeData(tf);
+  $("lblVol").style.display=vd?"":"none";
+  if(vd){
+    volumeSeries=chart.addHistogramSeries({priceFormat:{type:"volume"},priceScaleId:"vol",priceLineVisible:false,lastValueVisible:false});
+    volumeSeries.setData(vd);
+    volumeSeries.priceScale().applyOptions({scaleMargins:{top:0.82,bottom:0}});
+    volumeSeries.applyOptions({visible:$("ckVol").checked});
+  }
+  rebuildInds();
+  defaultLegend();
+  if(vr&&!keepWindow(vr))chart.timeScale().fitContent();
+  onRange();
+  redraw();
+}
+function sma(a,n){var s=0,o=new Array(a.length);for(var i=0;i<a.length;i++){s+=a[i];if(i>=n)s-=a[i-n];o[i]=(i>=n-1)?s/n:null;}return o}
+function ema(a,n){var k=2/(n+1),p=null,o=new Array(a.length);for(var i=0;i<a.length;i++){p=(p===null)?a[i]:a[i]*k+p*(1-k);o[i]=p;}return o}
+function boll(a,n){var m=sma(a,n),o=new Array(a.length);for(var i=0;i<a.length;i++){if(m[i]===null){o[i]=null;continue}var s=0;for(var j=i-n+1;j<=i;j++)s+=(a[j]-m[i])*(a[j]-m[i]);o[i]=Math.sqrt(s/n);}return {m:m,u:m.map(function(x,i){return x===null?null:x+2*o[i]}),lo:m.map(function(x,i){return x===null?null:x-2*o[i]})}}
+function rsi(a,n){
+  n=n||14;var out=new Array(a.length),g=0,l=0;
+  for(var i=0;i<a.length;i++){
+    out[i]=null;
+    if(i===0)continue;
+    var d=a[i]-a[i-1],up=d>0?d:0,dn=d<0?-d:0;
+    if(i<=n){
+      g+=up;l+=dn;
+      if(i===n){g=g/n;l=l/n;out[i]=l===0?100:100-100/(1+g/l);}
+    }else{
+      g=(g*(n-1)+up)/n;l=(l*(n-1)+dn)/n;
+      out[i]=l===0?100:100-100/(1+g/l);
+    }
+  }
+  return out;
+}
+function macd(a,fast,slow,signal){
+  fast=fast||12;slow=slow||26;signal=signal||9;
+  var ef=ema(a,fast),es=ema(a,slow);
+  var line=ef.map(function(v,i){return v-es[i]});
+  return {macd:line,signal:ema(line,signal)};
+}
+function mkLine(color,w,scaleId,fmt){
+  var o={color:color,lineWidth:w||1,priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:false,priceFormat:fmt||priceFmt()};
+  if(scaleId)o.priceScaleId=scaleId;
+  return chart.addLineSeries(o);
+}
+function toPts(times,vals){
+  var o=[];
+  for(var i=0;i<vals.length&&i<times.length;i++){var v=vals[i];if(v!==null&&v!==undefined)o.push({time:times[i],value:+v.toFixed(Math.max(6,PREC+2))});}
+  return o;
+}
+function setVis(list,on){
+  list.forEach(function(s){try{s.applyOptions({visible:on})}catch(e){}});
+}
+function indCalc(tf,i,def,c){
+  var key=tf+"|"+i,v=indCalcCache[key];
+  if(v!==undefined)return v;
+  var type=String(def.type||"").toLowerCase();
+  if(type==="bb")v={bb:boll(c,def.period||20)};
+  else if(type==="ema")v={line:ema(c,def.period||20)};
+  else if(type==="rsi")v={line:rsi(c,def.period||14)};
+  else if(type==="macd")v={macd:macd(c)};
+  else v={line:sma(c,def.period||20)};
+  indCalcCache[key]=v;
+  return v;
+}
+function rebuildInds(){
+  indSeries.forEach(function(o){o.list.forEach(function(s){try{chart.removeSeries(s)}catch(e){}})});
+  indSeries=[];
+  var defs=INDS[curTF]||[];
+  var T=TFS[curTF].time,c=TFS[curTF].close;
+  defs.forEach(function(def,i){
+    var col=def.color||PAL[i%PAL.length];
+    var type=String(def.type||"").toLowerCase();
+    var list=[];
+    if(def.values){
+      var s=mkLine(col,def.width||1);s.setData(toPts(T,def.values));list=[s];
+    }else{
+      var calc=indCalc(curTF,i,def,c);
+      if(calc.bb){
+        var su=mkLine(col+"77",1),sl=mkLine(col+"77",1);
+        su.setData(toPts(T,calc.bb.u));sl.setData(toPts(T,calc.bb.lo));list=[su,sl];
+      }else if(calc.macd){
+        var sm=mkLine(col,1,"ind"+i),sg=mkLine(col+"88",1,"ind"+i);
+        sm.setData(toPts(T,calc.macd.macd));sg.setData(toPts(T,calc.macd.signal));
+        sm.priceScale().applyOptions({scaleMargins:{top:0.7,bottom:0.02}});
+        list=[sm,sg];
+      }else if(type==="rsi"){
+        var sr=mkLine(col,1,"ind"+i,priceFmt(2));sr.setData(toPts(T,calc.line));
+        sr.priceScale().applyOptions({scaleMargins:{top:0.78,bottom:0.02}});
+        list=[sr];
+      }else{
+        var s2=mkLine(col,type==="ema"?2:1);s2.setData(toPts(T,calc.line));list=[s2];
+      }
+    }
+    if(def.on===false)setVis(list,false);
+    indSeries.push({def:def,list:list});
+  });
+  renderChips(defs);
+}
+function renderChips(defs){
+  var el=$("indChips");el.innerHTML="";
+  if(!defs.length)return;
+  defs.forEach(function(def,i){
+    var col=def.color||PAL[i%PAL.length];
+    var chip=document.createElement("span");
+    chip.className="chip"+(def.on===false?" off":"");
+    var dot=document.createElement("i");dot.style.background=col;
+    var lab=document.createElement("span");
+    lab.textContent=def.name||((def.type||"")+(def.period||""));
+    chip.appendChild(dot);chip.appendChild(lab);
+    chip.title="Toggle "+(def.name||"indicator");
+    chip.onclick=function(){
+      def.on=(def.on===false)?true:false;
+      for(var j=0;j<indSeries.length;j++){
+        if(indSeries[j].def===def)setVis(indSeries[j].list,def.on!==false);
+      }
+      renderChips(defs);
+    };
+    el.appendChild(chip);
+  });
+}
+function autoTone(v){
+  if(typeof v==="number")return v>0?"up":(v<0?"down":"");
+  var s=String(v).trim();
+  if(s.charAt(0)==="+")return "up";
+  if(s.charAt(0)==="-")return "down";
+  return "";
+}
+function renderStats(){
+  var el=$("stats"),lbl=$("lblStats");
+  if(!STATS.length){el.classList.add("hide");lbl.style.display="none";return}
+  lbl.style.display="";
+  var on=$("ckStats").checked;
+  el.classList.toggle("hide",!on);
+  if(!on){el.innerHTML="";return}
+  var h="<div class='h'>Metrics</div>";
+  STATS.forEach(function(s){
+    var tone=s.tone||autoTone(s.value);
+    h+="<div class='r'><span class='k'>"+esc(s.label)+"</span><span class='v "+(tone||"")+"'>"+esc(s.value)+"</span></div>";
+  });
+  el.innerHTML=h;
+}
+// Data notes (spec "notes"): what the bars are and how they were checked. The footer badge is
+// amber when any note is a warning; clicking it lists them.
+function notesWarn(){return NOTES.filter(function(n){return n.level==="warn"}).length}
+function renderNotes(){
+  var b=$("stNotes");
+  if(!NOTES.length){b.style.display="none";return}
+  var w=notesWarn();
+  b.style.display="";
+  b.className=w?"warn":"ok";
+  b.textContent=w?("⚠ Data: "+w+" warning"+(w>1?"s":"")):"✓ Data";
+  b.title=NOTES.map(function(n){return (n.level==="warn"?"⚠ ":"✓ ")+n.text}).join("\n");
+  $("notesPanel").innerHTML=NOTES.map(function(n){
+    var lv=n.level==="warn"?"warn":"info";
+    return "<div class='n "+lv+"'><i>"+(lv==="warn"?"⚠":"✓")+"</i><span>"+esc(n.text)+"</span></div>";
+  }).join("");
+}
+function applyRange(r){
+  if(!curTF)return;
+  var ts=chart.timeScale(),t=TFS[curTF].time;
+  if(!t.length)return;
+  if(r==="all"){ts.fitContent();return}
+  var last=t[t.length-1];
+  var ms=(r==="1m"?2592000e3:r==="3m"?7776000e3:r==="6m"?15552000e3:r==="1y"?31536000e3:0);
+  if(ms)ts.setVisibleRange({from:last-ms,to:last+86400});
+}
+// Soft magnet (owner, 2026-10-13: "need it to be free so i can glance the area which price moves, the magnet effect is okay
+// if very close to the high or low or close"): the crosshair follows the pointer, and snaps to the hovered candle's high, low
+// or close only when the pointer is within MAGNET_PX pixels of one (the nearest wins). setCrosshairPosition fires no
+// crosshair event of its own, so this handler is not re-entered; the next pointer move frees the crosshair again.
+function magnetPrice(param){
+  if(!magnetOn||!(MAGNET_PX>0)||!series||!param||!param.point||param.time==null||!param.seriesData)return null;
+  var bar=param.seriesData.get(series);if(!bar)return null;
+  var y=param.point.y,best=null,bd=MAGNET_PX+1e-9,lv=[bar.high,bar.low,bar.close];
+  for(var i=0;i<lv.length;i++){
+    var yy=yPx(lv[i]);if(yy===null||yy===undefined)continue;
+    var dd=Math.abs(yy-y);if(dd<bd){bd=dd;best=lv[i]}
+  }
+  return best;
+}
+function onCrosshair(param){
+  var stT=$("stT"),stP=$("stP"),stD=$("stD");
+  if(!param.time||!param.point||!series){
+    CROSS=null;stT.textContent="—";stP.textContent="—";stD.textContent="—";return;
+  }
+  var bar=param.seriesData.get(series);
+  var free=pxY(param.point.y),snap=magnetPrice(param);
+  if(snap!==null){try{chart.setCrosshairPosition(snap,param.time,series)}catch(e){snap=null}}
+  var px=snap!==null?snap:free;
+  CROSS={time:param.time,y:param.point.y,pointer:free,price:px,snapped:snap!==null};
+  stT.textContent=fmtT(param.time)+" "+TZNAME;
+  stP.textContent=px===null?"—":fp(px);
+  var txt=[];
+  if(bar){
+    var ch=bar.close-bar.open,pc=bar.open?ch/bar.open*100:0;
+    txt.push("O "+fp(bar.open),"H "+fp(bar.high),"L "+fp(bar.low),"C "+fp(bar.close)+(ch>=0?" +":" ")+pc.toFixed(2)+"%");
+    var v="<div class='l1'>"+esc(SYM)+" <span class='s2'>"+esc(PAY.exchange||"")+"</span><span class='tf'>"+esc(curTF)+"</span></div>";
+    v+="<div class='vals'><span class='c "+(ch>=0?"up":"dn")+"' style='font-weight:600;font-size:13px'>"+fp(bar.close)+"</span><span class='o'>O "+fp(bar.open)+"</span><span class='h'>H "+fp(bar.high)+"</span><span class='l'>L "+fp(bar.low)+"</span><span class='ch'>"+(ch>=0?"+":"")+pc.toFixed(2)+"%</span></div>";
+    $("legend").innerHTML=v;
+  }
+  indSeries.forEach(function(o){
+    if(o.def.on===false)return;
+    var iv=param.seriesData.get(o.list[0]);
+    if(iv){
+      var nm=o.def.name||((o.def.type||"")+(o.def.period||""));
+      txt.push(nm+" "+iv.value.toFixed(String(o.def.type||"").toLowerCase()==="rsi"?2:PREC));
+    }
+  });
+  zonesAt(param.time,px).forEach(function(l){txt.push("Zone: "+l)});
+  stD.textContent=txt.join("  |  ");
+}
+function defaultLegend(){
+  if(!series)return;
+  var d=TFS[curTF];if(!d.time.length)return;
+  var i=d.time.length-1;
+  var ch=d.close[i]-d.open[i],pc=d.open[i]?ch/d.open[i]*100:0;
+  var v="<div class='l1'>"+esc(SYM)+" <span class='s2'>"+esc(PAY.exchange||"")+"</span><span class='tf'>"+esc(curTF)+"</span></div>";
+  v+="<div class='vals'><span class='c "+(ch>=0?"up":"dn")+"' style='font-weight:600;font-size:13px'>"+fp(d.close[i])+"</span><span class='o'>O "+fp(d.open[i])+"</span><span class='h'>H "+fp(d.high[i])+"</span><span class='l'>L "+fp(d.low[i])+"</span><span class='ch'>"+(ch>=0?"+":"")+pc.toFixed(2)+"%</span></div>";
+  $("legend").innerHTML=v;
+}
+function onRange(){
+  syncEq();
+  redraw();
+}
+function syncEq(){
+  if(!eqChart||!chart)return;
+  var vr=chart.timeScale().getVisibleRange();
+  if(vr)eqChart.timeScale().setVisibleRange(vr);
+}
+var lastW=0,lastH=0,lastEW=0,lastEH=0;
+function fitCanvas(){
+  var r=$("chart").getBoundingClientRect();
+  // #overlay is only the drawing tools' input layer now (nothing is painted on it): CSS size only.
+  if(canvas.width!==1){canvas.width=1;canvas.height=1;}
+  canvas.style.width=r.width+"px";canvas.style.height=r.height+"px";
+  var cw=Math.max(1,Math.round(r.width)),ch=Math.max(1,Math.round(r.height));
+  if(chart&&(cw!==lastW||ch!==lastH)){lastW=cw;lastH=ch;chart.applyOptions({width:cw,height:ch});}
+  if(eqChart){
+    var er=$("eqC").getBoundingClientRect();
+    var ew=Math.max(1,Math.round(er.width)),eh=Math.max(1,Math.round(er.height));
+    if(er.width&&(ew!==lastEW||eh!==lastEH)){lastEW=ew;lastEH=eh;eqChart.applyOptions({width:ew,height:eh});}
+  }
+  redraw();
+}
+// Overlay times need not be bars of the shown timeframe (an M1 fill on an M15 page, an M15 entry
+// on the H1 button); timeToCoordinate is null off-grid, so such a time is drawn at the bar that
+// CONTAINS it. Before the first bar, or past the last bar's own span, it is off the page (null).
+function barStep(a){
+  var s=0,n=a.length;
+  for(var i=Math.max(1,n-50);i<n;i++){var d=a[i]-a[i-1];if(d>0&&(!s||d<s))s=d}
+  return s||86400;
+}
+function barAt(t){
+  var a=curTF&&TFS[curTF]?TFS[curTF].time:null;
+  if(!a||!a.length||t<a[0])return -1;
+  var lo=0,hi=a.length-1;
+  while(lo<hi){var mid=(lo+hi+1)>>1;if(a[mid]<=t)lo=mid;else hi=mid-1}
+  if(lo===a.length-1&&t>=a[lo]+barStep(a))return -1;
+  return lo;
+}
+function timeSide(t){
+  var a=curTF&&TFS[curTF]?TFS[curTF].time:null;
+  if(!a||!a.length)return 0;
+  return t<a[0]?-1:(barAt(t)<0?1:0);
+}
+function timeX(t){
+  if(t===null||t===undefined)return null;
+  var ts=chart.timeScale(),x=ts.timeToCoordinate(t);
+  if(x===null||x===undefined){
+    var i=barAt(t);
+    if(i<0)return null;
+    x=ts.timeToCoordinate(TFS[curTF].time[i]);
+  }
+  return (x===null||x===undefined)?null:x;
+}
+function xTime(x){var t=chart.timeScale().coordinateToTime(x);return (t===null||t===undefined)?null:t}
+function pxY(p){
+  if(!series)return null;
+  try{
+    var ps=series.priceScale();
+    if(ps&&typeof ps.coordinateToPrice==="function")return ps.coordinateToPrice(p);
+    if(typeof series.coordinateToPrice==="function")return series.coordinateToPrice(p);
+  }catch(e){}
+  return null;
+}
+function yPx(v){
+  if(!series)return null;
+  try{
+    var ps=series.priceScale();
+    if(ps&&typeof ps.priceToCoordinate==="function")return ps.priceToCoordinate(v);
+    if(typeof series.priceToCoordinate==="function")return series.priceToCoordinate(v);
+  }catch(e){}
+  return null;
+}
+function vRange(size){
+  var vr=chart.timeScale().getVisibleRange();
+  var x0=vr?timeX(vr.from):null,x1=vr?timeX(vr.to):null;
+  if(x0===null)x0=-60;if(x1===null)x1=size.width+60;
+  return {x0:x0,x1:x1,w:size.width,h:size.height};
+}
+// Zones, trades and drawings are painted INSIDE the chart's own render pass (a series primitive),
+// with the scales of the frame being drawn. They used to live on a canvas laid over the chart and
+// repainted on the time-range event, which fires before the price axis re-scales - and a
+// price-axis drag or zoom fires no event at all - so they drifted off their price/time until
+// something forced a repaint (reported 2026-09-27; tests/test_viewer.py TestOverlaysStayPut).
+// The #overlay canvas now only catches the pointer while a drawing tool is active.
+var overlayReq=null,PREVIEW=null,frameWaiters=[];
+function OverlayPrimitive(){}
+OverlayPrimitive.prototype.attached=function(p){overlayReq=p.requestUpdate};
+OverlayPrimitive.prototype.detached=function(){overlayReq=null};
+OverlayPrimitive.prototype.updateAllViews=function(){};
+OverlayPrimitive.prototype.paneViews=function(){return OVERLAY_VIEWS};
+var OVERLAY_RENDERER={draw:function(target){
+  target.useMediaCoordinateSpace(function(scope){paintOn(scope.context,scope.mediaSize)});
+}};
+var OVERLAY_VIEWS=[{zOrder:function(){return "top"},renderer:function(){return OVERLAY_RENDERER}}];
+function paintOn(c,size){
+  ctx=c;
+  PAINTED={zones:[],trades:[],drawings:[]};
+  if(size.width&&series){
+    var v=vRange(size);
+    if($("ckZones").checked)paintZones(v);
+    if($("ckTrades").checked)paintTrades(v);
+    paintD(v,drawings,true);
+    if(PREVIEW)paintD(v,PREVIEW);
+  }
+  var w=frameWaiters;frameWaiters=[];
+  w.forEach(function(f){f()});
+}
+function redraw(){if(overlayReq)overlayReq()}
+// Resolves once the chart has painted the overlay again (for scripts and tests reading debug()).
+function nextFrame(){return new Promise(function(res){frameWaiters.push(res);redraw();setTimeout(res,1000)})}
+function fitText(s,w){
+  if(ctx.measureText(s).width<=w)return s;
+  var lo=0,hi=s.length;
+  while(lo<hi){var mid=(lo+hi+1)>>1;if(ctx.measureText(s.slice(0,mid)+"…").width<=w)lo=mid;else hi=mid-1}
+  return lo?s.slice(0,lo).replace(/\s+$/,"")+"…":"";
+}
+function zonesAt(t,p){
+  var out=[];
+  if(t==null||p==null||!$("ckZones").checked)return out;
+  ZONES.forEach(function(z){
+    var s=barAt(z.start),from=s>=0?Math.min(z.start,TFS[curTF].time[s]):z.start;   // an off-grid start counts from its bar
+    if(z.label&&t>=from&&t<=z.end&&p>=Math.min(z.low,z.high)&&p<=Math.max(z.low,z.high))out.push(z.label);
+  });
+  return out;
+}
+// Project-local review presentation. Native prices and evidence are unchanged.
+var REVIEW_PALETTE={MN:'#ce9bff',W1:'#6f9dff',D1:'#42cddd',H4:'#f4bd62',H1:'#ed8fae',M30:'#b7d46c',M15:'#65d3ad',M5:'#c3cad8'};
+var reviewLabels=[];
+function reviewBadge(text,col,x,y,v){
+  ctx.font='500 12px -apple-system,sans-serif';
+  var txt=fitText(text,Math.min(310,v.x1-v.x0-20)),w=ctx.measureText(txt).width+12,h=18;
+  var baseX=Math.max(v.x0+3,Math.min(x,v.x1-w-3)),baseY=Math.max(3,Math.min(y,v.h-h-3)),chosen=null;
+  for(var step=0;step<Math.ceil(v.h/20)&&!chosen;step++){
+    for(var sign of [1,-1]){
+      var cy=baseY+sign*step*20;
+      if(cy<3||cy+h>v.h-3)continue;
+      for(var cx of [baseX,v.x1-w-3,v.x0+3]){
+        if(!reviewLabels.some(function(b){return cx<b.x+b.w+4&&cx+w+4>b.x&&cy<b.y+b.h+3&&cy+h+3>b.y})){
+          chosen={x:cx,y:cy,w:w,h:h};break;
+        }
+      }
+      if(chosen)break;
+    }
+  }
+  if(!chosen)return null; // Full label remains available in the zone hover and source table.
+  reviewLabels.push(chosen);
+  ctx.setLineDash([]);ctx.strokeStyle=hexA(col,.5);ctx.lineWidth=.6;
+  ctx.beginPath();ctx.moveTo(Math.max(v.x0,Math.min(x,v.x1)),Math.max(0,Math.min(y,v.h)));
+  ctx.lineTo(chosen.x+4,chosen.y+h/2);ctx.stroke();
+  ctx.fillStyle='rgba(16,24,32,.94)';ctx.fillRect(chosen.x,chosen.y,w,h);
+  ctx.fillStyle=col;ctx.fillText(txt,chosen.x+6,chosen.y+13);
+  return {text:txt,x:chosen.x,y:chosen.y,w:w,h:h};
+}
+function paintZones(v){
+  reviewLabels=[];
+  var badges=[];
+  ZONES.forEach(function(z,zi){
+    var xa=timeX(z.start),xb=timeX(z.end);
+    if(xa===null){if(timeSide(z.start)>0)return;xa=v.x0}
+    if(xb===null){if(timeSide(z.end)<0)return;xb=v.x1}
+    if(xb<v.x0||xa>v.x1)return;
+    var yh=yPx(z.high),yl=yPx(z.low);
+    if(yh===null||yl===null||yl<0||yh>v.h)return;
+    var col=z.color||'#8db6e4',fa=z.opacity===0?0:Math.min(z.opacity||.06,.06);
+    var fill=hexA(col,fa),line=hexA(col,.46),ref=!!z.reviewReference;
+    ctx.setLineDash(z.opacity===0?[4,4]:[]);
+    if(ref){
+      xb=Math.min(xa+64,v.x1);ctx.strokeStyle=line;ctx.lineWidth=.65;
+      ctx.beginPath();ctx.moveTo(xa,(yh+yl)/2);ctx.lineTo(xb,(yh+yl)/2);ctx.stroke();
+    }else{
+      ctx.fillStyle=fill;ctx.fillRect(xa,yh,xb-xa,yl-yh);
+      ctx.strokeStyle=line;ctx.lineWidth=.65;ctx.strokeRect(xa,yh,xb-xa,yl-yh);
+    }
+    ctx.setLineDash([]);
+    var pz={i:zi,xa:xa,xb:xb,yh:yh,yl:yl,fill:fill,line:line};PAINTED.zones.push(pz);
+    if(z.label)badges.push({z:z,pz:pz,x:Math.max(xa,v.x0)+5,y:Math.max(yh,0)+4,col:col});
+  });
+  badges.forEach(function(b){
+    var q=reviewBadge(b.z.label,b.col,b.x,b.y,v);
+    if(q){b.pz.label=q.text;b.pz.labelX=q.x;b.pz.labelY=q.y;b.pz.labelW=q.w;b.pz.labelH=q.h;}
+  });
+}
+
+function paintTrades(v){
+  if(!$("ckZones").checked)reviewLabels=[];
+  TRADES.forEach(function(tr,ti){
+    var col=tr.dir==="short"?"#ef5350":"#26a69a";
+    var xa=timeX(tr.entryTime);
+    if(xa===null||xa>v.x1)return;
+    var hasExit=tr.exitTime!==undefined&&tr.exitTime!==null;
+    var xb=hasExit?timeX(tr.exitTime):null;
+    // xb null with an exit = the exit is past the page, so the trade runs to the right edge.
+    if(xa<v.x0&&hasExit&&xb!==null&&xb<v.x0)return;
+    if(tr===hoverTrade){
+      var hx0=Math.max(xa,v.x0),hx1=Math.min(xb===null?v.x1:xb,v.x1);
+      if(hx1>hx0){ctx.fillStyle="rgba(41,98,255,0.12)";ctx.fillRect(hx0,0,hx1-hx0,v.h);}
+    }
+    var ye=yPx(tr.entryPrice);
+    if(ye===null)return;
+    var xEnd=Math.min(xa+72,xb!==null?xb:v.x1,v.x1);
+    ctx.lineWidth=.7;
+    ctx.setLineDash([5,4]);
+    if(tr.sl!=null){var ysl=yPx(tr.sl);if(ysl!==null){ctx.strokeStyle="rgba(239,83,80,0.85)";ctx.beginPath();ctx.moveTo(xa,ysl);ctx.lineTo(xEnd,ysl);ctx.stroke();}}
+    if(tr.tp!=null){var ytp=yPx(tr.tp);if(ytp!==null){ctx.strokeStyle="rgba(38,166,154,0.85)";ctx.beginPath();ctx.moveTo(xa,ytp);ctx.lineTo(xEnd,ytp);ctx.stroke();}}
+    ctx.setLineDash([]);
+    ctx.strokeStyle=col;ctx.fillStyle=col;
+    ctx.beginPath();ctx.moveTo(xa,ye);ctx.lineTo(xEnd,ye);ctx.stroke();
+    ctx.beginPath();ctx.arc(xa,ye,3.4,0,Math.PI*2);ctx.fill();
+    if(xb!==null&&xb>=v.x0){ctx.beginPath();ctx.arc(xb,ye,3.4,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.arc(xb,ye,2,0,Math.PI*2);ctx.fill();}
+    var dirlab=tr.dir==="long"?"L":"S";
+    var lbl=dirlab+" "+(tr.lots?tr.lots.toFixed(2):"")+" @"+fp(tr.entryPrice);
+    if(tr.exitPrice!=null)lbl+=" -> "+fp(tr.exitPrice);
+    if(tr.net!=null)lbl+="  "+fmtNet(tr);
+    PAINTED.trades.push({i:ti,xa:xa,xb:xb,xEnd:xEnd,y:ye,label:lbl});
+    var lr=chart.timeScale().getVisibleLogicalRange();
+    var vbars=lr?(lr.to-lr.from):9999;
+    if(vbars<150&&ye>0&&ye<v.h){
+      reviewBadge((tr.label||dirlab)+' @'+fp(tr.entryPrice),col,xa+6,ye-22,v);
+    }
+  });
+}
+function drawingAt(d){
+  if(d.k==="hline"){var y=yPx(d.p);return {xa:0,xb:0,ya:y,yb:y}}
+  return {xa:timeX(d.t1),xb:(d.t2!==undefined&&d.t2!==null)?timeX(d.t2):null,
+          ya:yPx(d.p1),yb:(d.p2!==undefined&&d.p2!==null)?yPx(d.p2):null};
+}
+function paintD(v,list,record){
+  list.forEach(function(d){
+    var col=d.color||"#2962ff";
+    ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=1.3;
+    if(record)PAINTED.drawings.push(drawingAt(d));
+    if(d.k==="hline"){
+      var y=yPx(d.p);
+      if(y===null||y<0||y>v.h)return;
+      ctx.beginPath();ctx.moveTo(v.x0,y);ctx.lineTo(v.x1,y);ctx.stroke();
+      var lb=fp(d.p);
+      ctx.font="10px -apple-system,sans-serif";var tw=ctx.measureText(lb).width+6;
+      ctx.fillStyle="rgba(19,23,34,0.9)";ctx.fillRect(v.x1-tw-3,y-9,tw,12);
+      ctx.fillStyle=col;ctx.fillText(lb,v.x1-tw,y+1);
+      return;
+    }
+    if(d.k==="rect"){
+      var xa=timeX(d.t1),xb=(d.t2!==undefined&&d.t2!==null)?timeX(d.t2):null;
+      var ya=yPx(d.p1),yb=(d.p2!==undefined&&d.p2!==null)?yPx(d.p2):null;
+      if(xa===null||ya===null)return;
+      if(xb===null)xb=v.x1;if(yb===null)yb=ya;
+      var X=Math.min(xa,xb),Y=Math.min(ya,yb),W=Math.abs(xb-xa),H=Math.abs(yb-ya);
+      ctx.fillStyle=hexA(col,0.07);ctx.fillRect(X,Y,W,H);
+      ctx.strokeRect(X+0.5,Y+0.5,W-1,H-1);
+      return;
+    }
+  });
+}
+function setTool(name){
+  drawMode=(name==="hand")?null:name;
+  drawBuf=null;PREVIEW=null;
+  var b=$("drawTools").children;
+  for(var i=0;i<b.length;i++)b[i].classList.toggle("active",b[i].dataset.tool===name);
+  canvas.classList.toggle("drawing",!!drawMode);
+  $("hint").textContent=drawMode?("Drawing "+name+" · click+drag · Esc to cancel"):"Hand: drag=pan · scroll=zoom · dbl-click=fit";
+}
+function evPoint(e){
+  var r=canvas.getBoundingClientRect();
+  var x=e.clientX-r.left,y=e.clientY-r.top;
+  return {x:x,y:y,t:xTime(x),p:pxY(y)};
+}
+function bindUI(){
+  $("ckZones").onchange=redraw;$("ckTrades").onchange=redraw;
+  $("ckMagnet").checked=magnetOn;
+  if(!(MAGNET_PX>0))$("ckMagnet").closest("label").style.display="none";
+  $("ckMagnet").onchange=function(){
+    magnetOn=$("ckMagnet").checked;
+    try{window.localStorage.setItem("chartlab.magnet",magnetOn?"on":"off")}catch(e){}
+  };
+  $("ckVol").onchange=function(){if(volumeSeries)volumeSeries.applyOptions({visible:$("ckVol").checked})};
+  $("ckStats").onchange=renderStats;
+  $("btnTrades").onclick=function(){toggleDrawer()};
+  $("stNotes").onclick=function(){$("notesPanel").classList.toggle("hide")};
+  $("notesPanel").onclick=function(){$("notesPanel").classList.add("hide")};
+  $("drawerClose").onclick=function(){toggleDrawer(false)};
+  var body=$("drawerBody");
+  body.addEventListener("mouseover",function(e){var r=rowFrom(e.target);if(r)setHover(+r.dataset.i)});
+  body.addEventListener("mouseout",function(e){if(rowFrom(e.target))setHover(null)});
+  body.addEventListener("click",function(e){var r=rowFrom(e.target);if(r)focusTrade(+r.dataset.i)});
+  var tools=$("drawTools");
+  for(var i=0;i<tools.children.length;i++)(function(b){
+    b.onclick=function(){setTool(b.dataset.tool)};
+  })(tools.children[i]);
+  var rbs=document.querySelectorAll("[data-r]");
+  for(var j=0;j<rbs.length;j++)(function(b){b.onclick=function(){applyRange(b.dataset.r)}})(rbs[j]);
+  var tzb=document.querySelectorAll("[data-tz]");
+  for(var t=0;t<tzb.length;t++)(function(b){b.onclick=function(){switchTZ(b.dataset.tz)}})(tzb[t]);
+  $("btnFit").onclick=function(){chart.timeScale().fitContent()};
+  $("btnClearDrw").onclick=function(){drawings=[];redraw()};
+  canvas.addEventListener("pointerdown",function(e){
+    if(!drawMode)return;
+    e.preventDefault();
+    try{canvas.setPointerCapture(e.pointerId)}catch(err){}
+    var pt=evPoint(e);
+    if(drawMode==="hline"){
+      if(pt.p!==null&&pt.p!==undefined){drawBuf={k:"hline",p:pt.p};commitPt();}
+      return;
+    }
+    if(pt.t!==null&&pt.p!==null)drawBuf={k:"rect",t1:pt.t,p1:pt.p,t2:pt.t,p2:pt.p};
+  });
+  canvas.addEventListener("pointermove",function(e){
+    if(!drawBuf||drawBuf.k!=="rect")return;
+    var pt=evPoint(e);
+    if(pt.t===null||pt.p===null)return;
+    drawBuf.t2=pt.t;drawBuf.p2=pt.p;
+    PREVIEW=[drawBuf];redraw();
+  });
+  canvas.addEventListener("pointerup",function(e){
+    if(!drawBuf)return;
+    if(drawBuf.k==="rect"){
+      var pt=evPoint(e);
+      if(pt.t!==null&&pt.p!==null){drawBuf.t2=pt.t;drawBuf.p2=pt.p;}
+      commitPt();
+    }
+  });
+  canvas.addEventListener("wheel",function(e){
+    if(!drawMode)return;
+    e.preventDefault();
+    var ts=chart.timeScale(),lr=ts.getVisibleLogicalRange();
+    if(!lr)return;
+    var f=Math.exp(e.deltaY*0.0012);
+    var sp=(lr.to-lr.from)*f,mid=(lr.to+lr.from)/2;
+    ts.setVisibleLogicalRange({from:mid-sp/2,to:mid+sp/2});
+  },{passive:false});
+  canvas.addEventListener("contextmenu",function(e){if(drawMode){e.preventDefault();setTool("hand");redraw()}});
+  canvas.addEventListener("dblclick",function(e){if(!drawMode)chart.timeScale().fitContent()});
+  window.addEventListener("keydown",function(e){
+    if(e.key==="Escape"){drawBuf=null;setTool("hand");redraw()}
+    if(e.key==="Delete"&&drawings.length){drawings.pop();redraw()}
+    if(e.key==="+"||e.key==="="){zoomBy(1.25)}
+    if(e.key==="-"){zoomBy(0.8)}
+  });
+  window.addEventListener("resize",function(){requestAnimationFrame(fitCanvas)});
+  requestAnimationFrame(fitCanvas);
+}
+function commitPt(){
+  PREVIEW=null;
+  if(!drawBuf)return;
+  var d=drawBuf;
+  if(d.k==="hline"){
+    drawings.push({k:"hline",p:d.p,color:"#2962ff"});
+    drawBuf=null;setTool("hand");redraw();return;
+  }
+  if(d.k==="rect"){
+    if(d.t2===undefined||d.t2===null||d.p2===undefined||d.p2===null){drawBuf=null;return;}
+    drawings.push({k:"rect",t1:d.t1,p1:d.p1,t2:d.t2,p2:d.p2,color:"#2962ff"});
+  }
+  drawBuf=null;redraw();
+}
+function zoomBy(f){
+  var ts=chart.timeScale(),lr=ts.getVisibleLogicalRange();
+  if(!lr)return;
+  var sp=(lr.to-lr.from)/f,mid=(lr.to+lr.from)/2;
+  ts.setVisibleLogicalRange({from:mid-sp/2,to:mid+sp/2});
+}
+function rowFrom(el){
+  while(el&&el!==document){
+    if(el.classList&&el.classList.contains("tr"))return el;
+    el=el.parentNode;
+  }
+  return null;
+}
+// A trade's net in its own unit: dollars whole (the default), R to 0.01, pips to 0.1.
+function fmtNet(tr){
+  var n=+tr.net,u=tr.netUnit||"$",s=n>=0?"+":"−",a=Math.abs(n);
+  if(u==="R")return s+a.toFixed(2)+"R";
+  if(u==="pips")return s+a.toFixed(1)+" pips";
+  return s+"$"+a.toFixed(0);
+}
+function tradeRowHtml(tr,i){
+  var d=tr.dir==="short"?"down":"up";
+  var arrow=tr.dir==="short"?"S":"L";
+  var px=fp(tr.entryPrice)+((tr.exitPrice!==undefined&&tr.exitPrice!==null)?" \u2192 "+fp(tr.exitPrice):"");
+  var nt="",tone="";
+  if(tr.net!==undefined&&tr.net!==null){nt=fmtNet(tr);tone=tr.net>=0?"up":"down";}
+  return "<div class='tr' data-i='"+i+"'><span class='d "+d+"'>"+arrow+"</span><span class='tm'>"+esc(fmtT(tr.entryTime))+"</span><span class='px'>"+px+"</span><span class='nt "+tone+"'>"+nt+"</span></div>";
+}
+function renderDrawerChunk(){
+  var body=$("drawerBody");
+  if(drawerRendered>=TRADES.length)return;
+  var end=Math.min(drawerRendered+250,TRADES.length),html="";
+  for(var i=drawerRendered;i<end;i++)html+=tradeRowHtml(TRADES[i],i);
+  var frag=document.createElement("div");frag.innerHTML=html;
+  while(frag.firstChild)body.appendChild(frag.firstChild);
+  drawerRendered=end;
+  if(drawerRendered<TRADES.length)requestAnimationFrame(renderDrawerChunk);
+}
+function setHover(i){
+  hoverTrade=(i===null||i===undefined)?null:TRADES[i];
+  redraw();
+}
+function focusTrade(i){
+  var tr=TRADES[i];if(!tr)return;
+  var from=tr.entryTime,to=(tr.exitTime!==undefined&&tr.exitTime!==null)?tr.exitTime:tr.entryTime;
+  if(to<from){var x=from;from=to;to=x}
+  var pad=Math.max(3600,(to-from)*0.2);
+  chart.timeScale().setVisibleRange({from:from-pad,to:to+pad});
+  redraw();
+}
+function toggleDrawer(force){
+  var el=$("drawer");
+  var open=(force===undefined)?el.classList.contains("hide"):!!force;
+  el.classList.toggle("hide",!open);
+  $("chartWrap").classList.toggle("drawerOpen",open);
+  if(open){
+    $("drawerTitle").textContent="Trades ("+TRADES.length+")";
+    if(drawerRendered===0)renderDrawerChunk();
+    requestAnimationFrame(fitCanvas);
+  }else setHover(null);
+}
+function startLoader(){
+  if(typeof LightweightCharts==="undefined"){
+    document.body.innerHTML="<p style='padding:20px;color:#ef5350'>Chart library failed to load (assets/lightweight-charts.standalone.production.js).</p>";
+    return;
+  }
+  var inline=(document.getElementById("payload").textContent||"").trim();
+  var url=SPEC_URL;
+  try{var q=new URLSearchParams(location.search).get("spec");if(q)url=q;}catch(e){}
+  if(inline&&inline!=="null"&&inline!=="undefined"){
+    try{usePayload(JSON.parse(inline))}catch(e){usePayload(null)}
+    init();return;
+  }
+  if(url){
+    fetch(url,{cache:"no-cache"}).then(function(r){
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      return r.json();
+    }).then(function(j){usePayload(j);init()}).catch(function(e){
+      document.body.innerHTML="<p style='padding:20px;color:#ef5350'>Failed to load spec from "+esc(url)+": "+esc(String((e&&e.message)||e))+"</p>";
+    });
+    return;
+  }
+  document.body.innerHTML="<p style='padding:20px;color:#ef5350'>No chart data found (inline payload missing and no spec URL).</p>";
+}
+function boot(){startLoader()}
+function debug(){
+  if(!series)return {ready:false};
+  var vr=chart.timeScale().getVisibleRange();
+  var defs=INDS[curTF]||[];
+  var T=TFS[curTF].time,r=$("chart").getBoundingClientRect();
+  return {
+    painted:{zones:PAINTED.zones.slice(),trades:PAINTED.trades.slice(),drawings:(PAINTED.drawings||[]).slice()},
+    // where each zone / trade SHOULD be now (the chart's current scales), to compare with painted
+    now:{zones:ZONES.map(function(z){return {xa:timeX(z.start),xb:timeX(z.end),yh:yPx(z.high),yl:yPx(z.low)}}),
+         trades:TRADES.map(function(t){return {xa:timeX(t.entryTime),y:yPx(t.entryPrice)}}),
+         drawings:drawings.map(drawingAt)},
+    width:r.width,firstX:T.length?timeX(T[0]):null,lastX:T.length?timeX(T[T.length-1]):null,
+    view:PAY.view||null,
+    ready:true,zones:ZONES.length,trades:TRADES.length,
+    crosshair:CROSS,magnetPx:MAGNET_PX,magnetOn:magnetOn,zoneOpacity:ZONE_FILL,
+    zonesOn:$("ckZones").checked,drawings:drawings.length,
+    drawingList:drawings.map(function(d){return d;}),
+    inds:defs.length,
+    indsOn:defs.filter(function(d){return d.on!==false}).length,
+    volume:!!volumeSeries,volumeOn:volumeSeries?$("ckVol").checked:false,
+    eqOn:!$("eqWrap").classList.contains("hide"),
+    stats:STATS.length,statsOn:!$("stats").classList.contains("hide"),
+    notes:NOTES.length,notesWarn:notesWarn(),notesBadge:$("stNotes").style.display==="none"?null:$("stNotes").textContent,
+    drawerOpen:!$("drawer").classList.contains("hide"),drawerRows:drawerRendered,
+    tf:curTF,tz:TZNAME,tzOffset:OFF,precision:PREC,first:TFS[curTF].time[0],last:TFS[curTF].time[TFS[curTF].time.length-1],
+    bars:TFS[curTF].time.length,visible:vr?{from:vr.from,to:vr.to}:null
+  };
+}
+function navigation(config){
+  var host=$("tfBtns");host.textContent="";
+  config.timeframes.forEach(function(tf){
+    var button=document.createElement("button");button.className="tb"+(tf===config.current?" on":"");
+    button.textContent=tf;button.dataset.navigationTf=tf;button.setAttribute("aria-pressed",String(tf===config.current));
+    button.onclick=function(){config.onChange(tf)};host.appendChild(button);
+  });
+}
+window.ChartLab={navigation:navigation,debug:debug,setTF:function(tf){setTF(tf)},timeframes:function(){return Object.keys(TFS)},zonesAt:zonesAt,
+  frame:nextFrame,api:function(){return {chart:chart,series:series}}};
+window.__chartDebug=debug;
+boot();
+})();
+</script>
+</body>
+</html>
