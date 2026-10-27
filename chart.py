@@ -754,6 +754,8 @@ def render(s, out_path, *, title=None, viewer=None, lib=None,
            spec_url: str | None = None) -> Path:
     if normalize_spec:
         s = normalize(s)
+    if viewer is None and s.get("reviewPresentation"):
+        viewer = _resolve_asset(None, "review_viewer.html")
     safe_title = str(title or s.get("title") or s.get("symbol") or "Chart")
     return _emit(out_path, viewer_path=_resolve_asset(viewer, VIEWER_NAME),
                  lib_path=_resolve_asset(lib, LIB_NAME), title=safe_title, spec=s,

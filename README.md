@@ -1,5 +1,7 @@
 # ChartLab
 
+Review charts: [shared navigation and presentation](docs/REVIEW_NAVIGATION.md) documents free panning, embedded timeframe controls and the opt-in `reviewPresentation` theme.
+
 ChartLab turns a plain JSON description of price data into an **offline, interactive,
 TradingView-style HTML chart** — no CDN, no network, no server required.
 
