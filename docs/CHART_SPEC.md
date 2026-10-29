@@ -107,6 +107,8 @@ A shaded rectangle spanning two times and two prices.
 | `label` | string | no       | Drawn inside the rectangle, cut to its width with `…`; the full text shows in the status bar when the cursor is inside the zone. |
 | `color` | string | no       | CSS hex (`"#f5c542"`) or `rgb(...)` / `rgba(...)` (its alpha is not used: the fill takes the opacity below, the border 0.85). |
 | `opacity` | float 0–1 | no    | This zone's fill opacity; else the page's `zoneOpacity`, else 0.22. |
+| `style` | `"box"` / `"line"` | no | `"line"` draws ONE price level (at the middle of `low`..`high`) with no fill — a measured fill, an order price. A zone whose `low` equals its `high` is drawn as a line too. Default `"box"` (not written). |
+| `width` | float, 0 < px ≤ 6 | no | A line's stroke width in screen pixels; default 1 px (standard viewer) / 0.5 px (review theme). |
 
 Aliases: `from`/`to` for `start`/`end`, `lo`/`bottom` for `low`, `hi`/`top` for `high`.
 

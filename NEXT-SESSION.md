@@ -1,3 +1,11 @@
+## v0.4.3 level-line zones (2026-10-29, Claude, branch `level-line-zones-20261029`)
+
+engulfingCore owner: "the yellow line showing screenshot entry please make it thinner". A zone with `style: "line"` (or
+low == high) is now ONE stroke of `width` px (default 1; 0.5 in the review theme), no fill; `zones_from_rows` / `validate`
+check `style` and `width`. Spec: docs/CHART_SPEC.md zone table; CHANGELOG 0.4.3. Full pytest 198 passed (195 + 3 new in
+tests/test_level_lines.py, both viewers painted in headless Edge). Pushed as a feature branch with a PR; main is untouched
+until the owner merges. The owner's untracked `agents.md` / `PROJECT_SUMMARY.md` are left alone.
+
 ## Review navigation and presentation COMPLETE (2026-10-27)
 
 Owner requested free panning, visible timeframe controls and reusable review presentation. Shared viewer plus opt-in review theme updated. Read docs/REVIEW_NAVIGATION.md. Full pytest: 195 tests and 2 subtests PASS (10 expected synthetic-data warnings). New tests/test_review_navigation.py covers the generic adapter, both free edges, five-digit prices and opt-in theme. Flake8: new test clean; chart.py has 76 pre-existing style findings unchanged from HEAD; no new findings. EngulfingCore real Chromium mouse-input audit passed both directions and right-edge overscroll on7 charts; embedded toolbar and all15 eight-timeframe round trips passed. The first input harness failed to drive mouse events; real CDP input replaced it. File navigation through CDP was aborted by Edge startup; fresh targets over a temporary loopback server worked. Existing file-URL iframe regression also passed. No data/engine changes. Commit/push this completed change.

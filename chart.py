@@ -208,7 +208,25 @@ def _norm_zone(z: dict) -> dict:
         out["color"] = str(z["color"])
     if z.get("opacity") is not None:
         out["opacity"] = _check_opacity(z["opacity"], "zone opacity")
+    style = z.get("style")
+    if style is not None and style not in ("box", "line"):
+        raise ValueError(f"zone style must be 'box' or 'line', got {style!r}")
+    if style == "line":
+        out["style"] = "line"
+    if z.get("width") is not None:
+        out["width"] = _check_width(z["width"])
     return out
+
+
+def _check_width(value, what="zone width") -> float:
+    """A level line's stroke width in screen pixels: more than 0, at most 6. Anything else raises."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} must be a number of pixels, got {value!r}") from None
+    if not 0.0 < v <= 6.0:
+        raise ValueError(f"{what} must be more than 0 and at most 6 px, got {value!r}")
+    return v
 
 
 def _check_opacity(value, what="zoneOpacity") -> float:
@@ -611,12 +629,18 @@ def validate(s: dict) -> list:
             except ValueError as exc:
                 problems.append(str(exc))
     for z in (s.get("overlay") or {}).get("zones") or []:
-        if isinstance(z, dict) and z.get("opacity") is not None:
-            try:
+        if not isinstance(z, dict):
+            continue
+        try:
+            if z.get("opacity") is not None:
                 _check_opacity(z["opacity"], "zone opacity")
-            except ValueError as exc:
-                problems.append(str(exc))
-                break
+            if z.get("width") is not None:
+                _check_width(z["width"])
+            if z.get("style") not in (None, "box", "line"):
+                raise ValueError(f"zone style must be 'box' or 'line', got {z['style']!r}")
+        except ValueError as exc:
+            problems.append(str(exc))
+            break
 
     eq = s.get("equity")
     if eq:
