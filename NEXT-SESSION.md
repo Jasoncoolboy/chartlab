@@ -3,8 +3,9 @@
 engulfingCore owner: "the yellow line showing screenshot entry please make it thinner". A zone with `style: "line"` (or
 low == high) is now ONE stroke of `width` px (default 1; 0.5 in the review theme), no fill; `zones_from_rows` / `validate`
 check `style` and `width`. Spec: docs/CHART_SPEC.md zone table; CHANGELOG 0.4.3. Full pytest 198 passed (195 + 3 new in
-tests/test_level_lines.py, both viewers painted in headless Edge). Pushed as a feature branch with a PR; main is untouched
-until the owner merges. The owner's untracked `agents.md` / `PROJECT_SUMMARY.md` are left alone.
+tests/test_level_lines.py, both viewers painted in headless Edge). PR #2 merged into main at the owner's request (2026-10-29,
+"merge the pr in chartlab to main if all good"; suite re-run 198 passed before the merge). The owner's untracked `agents.md` /
+`PROJECT_SUMMARY.md` are left alone.
 
 ## Review navigation and presentation COMPLETE (2026-10-27)
 
