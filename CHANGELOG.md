@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-29
+
+### Added
+
+- **Level-line zones** (engulfingCore owner, 2026-10-29: "the yellow line showing screenshot entry please make it
+  thinner"). A zone with `style: "line"`, or one whose `low` equals its `high`, is one price level: both viewers draw a
+  single stroke of the zone's `width` (default 1 px; 0.5 px in the review theme) and no fill. A zero-height zone used to be
+  stroked as a rectangle — two edges about a pixel apart — which read as a thick band. `style` must be `"box"` or
+  `"line"` and `width` more than 0 and at most 6 px (`zones_from_rows` raises, `validate` reports). `debug().painted.zones`
+  carries `style` / `width` for a line. Tests: `tests/test_level_lines.py` (spec checks + both viewers in headless Edge).
+
 ## [0.4.2] - 2026-10-13
 
 ### Changed

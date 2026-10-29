@@ -798,7 +798,12 @@ function paintZones(v){
     var col=z.color||'#8db6e4',fa=z.opacity===0?0:Math.min(z.opacity||.06,.06);
     var fill=hexA(col,fa),line=hexA(col,.46),ref=!!z.reviewReference;
     ctx.setLineDash(z.opacity===0?[4,4]:[]);
-    if(ref){
+    var lvl=z.style==="line"||z.high===z.low;
+    if(lvl){
+      // A level (style "line", or low == high): a hairline of the zone's width (default 0.5 px), no fill.
+      ctx.strokeStyle=hexA(col,.6);ctx.lineWidth=z.width||.5;
+      ctx.beginPath();ctx.moveTo(xa,(yh+yl)/2);ctx.lineTo(xb,(yh+yl)/2);ctx.stroke();
+    }else if(ref){
       xb=Math.min(xa+64,v.x1);ctx.strokeStyle=line;ctx.lineWidth=.65;
       ctx.beginPath();ctx.moveTo(xa,(yh+yl)/2);ctx.lineTo(xb,(yh+yl)/2);ctx.stroke();
     }else{
@@ -806,7 +811,9 @@ function paintZones(v){
       ctx.strokeStyle=line;ctx.lineWidth=.65;ctx.strokeRect(xa,yh,xb-xa,yl-yh);
     }
     ctx.setLineDash([]);
-    var pz={i:zi,xa:xa,xb:xb,yh:yh,yl:yl,fill:fill,line:line};PAINTED.zones.push(pz);
+    var pz={i:zi,xa:xa,xb:xb,yh:yh,yl:yl,fill:lvl?null:fill,line:lvl?hexA(col,.6):line};
+    if(lvl){pz.style="line";pz.width=z.width||.5;}
+    PAINTED.zones.push(pz);
     if(z.label)badges.push({z:z,pz:pz,x:Math.max(xa,v.x0)+5,y:Math.max(yh,0)+4,col:col});
   });
   badges.forEach(function(b){

@@ -755,6 +755,20 @@ function paintZones(v){
     // colour carries, so the box reads clearly.
     var col=z.color||"#2962ff",fa=(typeof z.opacity==="number"&&z.opacity>=0&&z.opacity<=1)?z.opacity:ZONE_FILL;
     var fill=hexA(col,fa),line=hexA(col,ZONE_LINE);
+    // A level (style "line", or low == high): one stroke of the zone's width (default 1 px), no fill, label above it.
+    if(z.style==="line"||z.high===z.low){
+      var ym=(yh+yl)/2,w=z.width||1;
+      ctx.strokeStyle=line;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(xa,ym);ctx.lineTo(xb,ym);ctx.stroke();
+      var pl={i:zi,xa:xa,xb:xb,yh:ym,yl:ym,fill:null,line:line,style:"line",width:w};
+      var llx=Math.max(xa,0)+6,lroom=xb-llx-6;
+      if(z.label&&lroom>=24){
+        ctx.font="500 11px -apple-system,sans-serif";ctx.fillStyle=hexA(col,1);
+        var ltxt=fitText(z.label,lroom);
+        if(ltxt){ctx.fillText(ltxt,llx,ym-3);pl.label=ltxt;pl.labelX=llx;pl.labelW=ctx.measureText(ltxt).width}
+      }
+      PAINTED.zones.push(pl);
+      return;
+    }
     ctx.fillStyle=fill;ctx.fillRect(xa,yh,xb-xa,yl-yh);
     ctx.strokeStyle=line;ctx.lineWidth=1;ctx.strokeRect(xa+0.5,yh+0.5,xb-xa-1,yl-yh-1);
     var pz={i:zi,xa:xa,xb:xb,yh:yh,yl:yl,fill:fill,line:line};
